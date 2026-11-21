@@ -32,7 +32,6 @@ export interface PunePresetRoute {
   origin: { name: string; lat: number; lng: number };
   destination: { name: string; lat: number; lng: number };
   baselinePath: [number, number][];
-  fallbackDetourWaypoint?: { lat: number; lng: number };
 }
 
 // Preset test routes across high-traffic flood corridors in Pune
@@ -48,8 +47,7 @@ export const PRESET_PUNE_ROUTES: PunePresetRoute[] = [
       [18.5428, 73.8210],
       [18.5360, 73.8340],
       [18.5314, 73.8446]
-    ],
-    fallbackDetourWaypoint: { lat: 18.5540, lng: 73.8280 }
+    ]
   },
   {
     id: 'route-sinhagad-deccan',
@@ -61,8 +59,7 @@ export const PRESET_PUNE_ROUTES: PunePresetRoute[] = [
       [18.4890, 73.8360],
       [18.5020, 73.8390],
       [18.5175, 73.8415]
-    ],
-    fallbackDetourWaypoint: { lat: 18.4980, lng: 73.8510 }
+    ]
   },
   {
     id: 'route-kothrud-swargate',
@@ -74,8 +71,7 @@ export const PRESET_PUNE_ROUTES: PunePresetRoute[] = [
       [18.5090, 73.8250],
       [18.5050, 73.8420],
       [18.5015, 73.8580]
-    ],
-    fallbackDetourWaypoint: { lat: 18.5140, lng: 73.8350 }
+    ]
   },
   {
     id: 'route-hinjawadi-aundh',
@@ -87,8 +83,7 @@ export const PRESET_PUNE_ROUTES: PunePresetRoute[] = [
       [18.5780, 73.7650],
       [18.5660, 73.7890],
       [18.5582, 73.8065]
-    ],
-    fallbackDetourWaypoint: { lat: 18.5790, lng: 73.7740 }
+    ]
   },
   {
     id: 'route-katraj-punestation',
@@ -100,8 +95,7 @@ export const PRESET_PUNE_ROUTES: PunePresetRoute[] = [
       [18.4820, 73.8620],
       [18.5015, 73.8580],
       [18.5284, 73.8744]
-    ],
-    fallbackDetourWaypoint: { lat: 18.4890, lng: 73.8820 }
+    ]
   }
 ];
 
@@ -165,7 +159,7 @@ export async function fetchOSRMRoute(
     const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 6500);
 
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
@@ -223,7 +217,7 @@ export async function fetchOSRMRoute(
     }, 0);
 
     const distanceKm = Number((totalDistM / 1000).toFixed(1));
-    const durationMinutes = Math.max(3, Math.round((distanceKm / 25) * 60)); // ~25km/h city monsoon average
+    const durationMinutes = Math.max(3, Math.round((distanceKm / 25) * 60));
 
     const fallbackSteps: RouteStep[] = [
       {
@@ -302,29 +296,26 @@ export function findBlockingHazard(
 }
 
 /**
- * Calculates perpendicular detour waypoint around a blocking hazard
+ * Calculates two candidate normal detour waypoints around a blocking hazard
  */
-function calculateDetourWaypoint(
+function calculateDetourCandidates(
   origin: { lat: number; lng: number },
   destination: { lat: number; lng: number },
   hazard: RouteHazardBlock
-): { lat: number; lng: number } {
-  // Vector from origin to destination
+): { waypoint1: { lat: number; lng: number }; waypoint2: { lat: number; lng: number } } {
   const dLat = destination.lat - origin.lat;
   const dLng = destination.lng - origin.lng;
-  const mag = Math.sqrt(dLat * dLat + dLng * dLng) || 0.001;
+  const mag = Math.hypot(dLat, dLng) || 0.001;
 
-  // Normal unit vectors (perpendicular)
+  // Normal vectors
   const normLat = -dLng / mag;
   const normLng = dLat / mag;
 
-  // Detour offset: hazard radius + buffer + safety margin (~600m in degrees)
-  const offsetDeg = Math.max(0.006, (hazard.radiusMeters + 350) / 111320);
+  const offsetDeg = Math.max(0.005, (hazard.radiusMeters + 350) / 111320);
 
-  // Return offset waypoint
   return {
-    lat: hazard.lat + normLat * offsetDeg,
-    lng: hazard.lng + normLng * offsetDeg
+    waypoint1: { lat: hazard.lat + normLat * offsetDeg, lng: hazard.lng + normLng * offsetDeg },
+    waypoint2: { lat: hazard.lat - normLat * offsetDeg, lng: hazard.lng - normLng * offsetDeg }
   };
 }
 
@@ -370,49 +361,72 @@ export async function calculateAvoidanceRoute(
   let alternateRoute: RouteOption | null = null;
 
   if (isBaselineBlocked && baselineBlock) {
-    // Generate dynamic detour waypoint around the blocking hazard
-    const detourWaypoint = calculateDetourWaypoint(origin, destination, baselineBlock);
+    // Generate two candidate detour waypoints around the blocking hazard
+    const { waypoint1, waypoint2 } = calculateDetourCandidates(origin, destination, baselineBlock);
     
-    // Fetch alternate route passing through detour waypoint
-    const altOSRM = await fetchOSRMRoute(origin, destination, [detourWaypoint]);
-    const altBlock = findBlockingHazard(altOSRM.geometry, activeReports);
+    // Fetch both detour paths in parallel
+    const [alt1, alt2] = await Promise.all([
+      fetchOSRMRoute(origin, destination, [waypoint1]),
+      fetchOSRMRoute(origin, destination, [waypoint2])
+    ]);
+
+    const block1 = findBlockingHazard(alt1.geometry, activeReports);
+    const block2 = findBlockingHazard(alt2.geometry, activeReports);
+
+    // Select the candidate that avoids all hazard circles with minimum extra distance
+    let chosenAlt = alt1;
+    let chosenBlock = block1;
+
+    if (!block2 && (block1 || alt2.distanceKm < alt1.distanceKm)) {
+      chosenAlt = alt2;
+      chosenBlock = block2;
+    } else if (!block1) {
+      chosenAlt = alt1;
+      chosenBlock = block1;
+    }
 
     alternateRoute = {
       id: 'route-alternate-avoidance',
       name: 'Recommended Route Avoiding Reported Flooding',
       summary: `Bypass around ${baselineBlock.depth} waterlogging via elevated corridor`,
-      distanceKm: altOSRM.distanceKm,
-      durationMinutes: altOSRM.durationMinutes,
+      distanceKm: chosenAlt.distanceKm,
+      durationMinutes: chosenAlt.durationMinutes,
       isBaseline: false,
-      isBlocked: Boolean(altBlock),
-      blockingHazard: altBlock,
-      geometry: altOSRM.geometry,
-      elevationGainM: 26,
-      riskDescription: altBlock
+      isBlocked: Boolean(chosenBlock),
+      blockingHazard: chosenBlock,
+      geometry: chosenAlt.geometry,
+      elevationGainM: 24,
+      riskDescription: chosenBlock
         ? 'Detour also intersects reported waterlogging; use high caution.'
         : 'Circumvents active flood zones along elevated terrain.',
-      avoidanceVerified: !altBlock,
-      steps: altOSRM.steps
+      avoidanceVerified: !chosenBlock,
+      steps: chosenAlt.steps
     };
   } else {
-    // Baseline is clear; generate alternative elevated option if preset has detour
-    const fallbackWaypoint = preset.fallbackDetourWaypoint;
-    const waypoints = fallbackWaypoint ? [fallbackWaypoint] : [];
-    const altOSRM = await fetchOSRMRoute(origin, destination, waypoints);
+    // Baseline is completely clear! Compute a minor parallel alternative
+    const midLat = (origin.lat + destination.lat) / 2;
+    const midLng = (origin.lng + destination.lng) / 2;
+    const dLat = destination.lat - origin.lat;
+    const dLng = destination.lng - origin.lng;
+    const mag = Math.hypot(dLat, dLng) || 0.001;
+    const offset = 0.003;
+    const midWaypoint = { lat: midLat - (dLng / mag) * offset, lng: midLng + (dLat / mag) * offset };
+
+    const altOSRM = await fetchOSRMRoute(origin, destination, [midWaypoint]);
     const altBlock = findBlockingHazard(altOSRM.geometry, activeReports);
 
     alternateRoute = {
       id: 'route-alternate-clear',
-      name: 'Alternate Elevated Corridor',
-      summary: 'Secondary arterial route along higher elevation grade',
+      name: 'Alternate Parallel Corridor',
+      summary: 'Secondary road corridor along higher elevation grade',
       distanceKm: altOSRM.distanceKm,
       durationMinutes: altOSRM.durationMinutes,
       isBaseline: false,
       isBlocked: Boolean(altBlock),
       blockingHazard: altBlock,
       geometry: altOSRM.geometry,
-      elevationGainM: 22,
-      riskDescription: 'Circumvents low-lying stormwater drains.',
+      elevationGainM: 18,
+      riskDescription: 'No confirmed flooding reported on this route.',
       avoidanceVerified: !altBlock,
       steps: altOSRM.steps
     };

@@ -155,11 +155,8 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
   const [activeTab, setActiveTab] = useState<'alternate' | 'baseline'>('alternate');
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // --- Live Google Maps GPS Navigation State ---
+  // --- Live Navigation Mode State ---
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
-  const [liveGpsPos, setLiveGpsPos] = useState<[number, number] | null>(null);
-  const [liveGpsHeading, setLiveGpsHeading] = useState<number>(0);
-  const [isLiveGpsActive, setIsLiveGpsActive] = useState<boolean>(true);
   const [currentCoordIdx, setCurrentCoordIdx] = useState<number>(0);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isRecentered, setIsRecentered] = useState<boolean>(true);
@@ -167,12 +164,12 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
 
   const lastSpokenStepRef = useRef<number>(-1);
 
-  // When a destination is targeted externally (e.g., from SheltersView "Directions")
+  // When arriving from SheltersView ("Directions")
   useEffect(() => {
     if (targetDestination) {
       setIsCustomMode(true);
       setCustomDestination({
-        id: 'shelter-dest',
+        id: 'shelter-target',
         name: targetDestination.name,
         lat: targetDestination.lat,
         lng: targetDestination.lng,
@@ -180,8 +177,8 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
 
       if (userLocation) {
         setCustomOrigin({
-          id: 'user-live-loc',
-          name: 'Your Current Location (GPS)',
+          id: 'live-gps',
+          name: 'My Current Location (GPS)',
           lat: userLocation[0],
           lng: userLocation[1],
         });
@@ -189,7 +186,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
     }
   }, [targetDestination, userLocation]);
 
-  // Active Origin & Destination
+  // Compute active origin & destination
   const activePreset: PunePresetRoute =
     PRESET_PUNE_ROUTES.find((r) => r.id === selectedPresetId) || PRESET_PUNE_ROUTES[0];
 
@@ -200,6 +197,15 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
   const currentDestination = isCustomMode && customDestination
     ? { name: customDestination.name, lat: customDestination.lat, lng: customDestination.lng }
     : activePreset.destination;
+
+  // Is the origin set to user's real live GPS position?
+  const isOriginLiveGps = Boolean(
+    isCustomMode &&
+      customOrigin &&
+      userLocation &&
+      Math.abs(customOrigin.lat - userLocation[0]) < 0.001 &&
+      Math.abs(customOrigin.lng - userLocation[1]) < 0.001
+  );
 
   // Fetch Route from OSRM
   useEffect(() => {
@@ -215,8 +221,11 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
       if (isMounted) {
         setRerouteResult(res);
         setIsLoading(false);
+        // If baseline is blocked by flood, recommend alternate; otherwise recommend baseline
         if (res.hasFloodingOnBaseline) {
           setActiveTab('alternate');
+        } else {
+          setActiveTab('baseline');
         }
       }
     });
@@ -234,62 +243,50 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
   const routeGeometry = displayedRoute?.geometry || [];
 
   // =========================================================================
-  // REAL-TIME GPS TRACKING WITH NAVIGATOR.GEOLOCATION.WATCHPOSITION
-  // (Moves strictly with the user's actual live position, like Google Maps!)
+  // LIVE GPS TRACKING: Only active when origin IS the user's live GPS location
+  // When origin is a preset (e.g. Baner), vehicle stays on the Baner route!
   // =========================================================================
   useEffect(() => {
-    if (!isNavigating) return;
+    if (!isNavigating || !isOriginLiveGps || !userLocation || routeGeometry.length === 0) return;
 
     let watchId: number | null = null;
 
     if ('geolocation' in navigator) {
-      setIsLiveGpsActive(true);
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const uLat = pos.coords.latitude;
           const uLng = pos.coords.longitude;
-          setLiveGpsPos([uLat, uLng]);
 
-          // Heading
-          if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
-            setLiveGpsHeading(pos.coords.heading);
-          } else if (liveGpsPos) {
-            setLiveGpsHeading(calculateHeading(liveGpsPos, [uLat, uLng]));
-          }
-
-          // Map user location to closest route coordinate
-          if (routeGeometry.length > 0) {
-            let minD = Infinity;
-            let closest = 0;
-            for (let i = 0; i < routeGeometry.length; i++) {
-              const d = calculateDistanceMeters(uLat, uLng, routeGeometry[i][0], routeGeometry[i][1]);
-              if (d < minD) {
-                minD = d;
-                closest = i;
-              }
+          // Find closest point on route polyline to user's actual location
+          let minD = Infinity;
+          let closest = 0;
+          for (let i = 0; i < routeGeometry.length; i++) {
+            const d = calculateDistanceMeters(uLat, uLng, routeGeometry[i][0], routeGeometry[i][1]);
+            if (d < minD) {
+              minD = d;
+              closest = i;
             }
-            setCurrentCoordIdx(closest);
+          }
+          setCurrentCoordIdx(closest);
 
-            // Check if user reached destination (< 35m)
-            const destD = calculateDistanceMeters(
-              uLat,
-              uLng,
-              currentDestination.lat,
-              currentDestination.lng
-            );
-            if (destD < 35) {
-              setTripCompleted(true);
-              if (voiceEnabled) {
-                speakVoiceGuidance('You have arrived at your destination.');
-              }
+          // Check if user reached destination (< 35m)
+          const destD = calculateDistanceMeters(
+            uLat,
+            uLng,
+            currentDestination.lat,
+            currentDestination.lng
+          );
+          if (destD < 35) {
+            setTripCompleted(true);
+            if (voiceEnabled) {
+              speakVoiceGuidance('You have arrived at your destination.');
             }
           }
         },
         (err) => {
-          console.warn('Live GPS watch error (fallback to route point):', err);
-          setIsLiveGpsActive(false);
+          console.warn('Geolocation watchPosition error:', err);
         },
-        { enableHighAccuracy: true, maximumAge: 1000, timeout: 8000 }
+        { enableHighAccuracy: true, maximumAge: 1500, timeout: 8000 }
       );
     }
 
@@ -298,23 +295,21 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
         navigator.geolocation.clearWatch(watchId);
       }
     };
-  }, [isNavigating, routeGeometry, currentDestination, voiceEnabled, liveGpsPos]);
+  }, [isNavigating, isOriginLiveGps, userLocation, routeGeometry, currentDestination, voiceEnabled]);
 
-  // Current vehicle marker coordinate (defaults to real GPS or selected route point)
+  // Current vehicle marker coordinate (ALWAYS strictly on the route geometry!)
   const currentVehicleCoord: [number, number] = useMemo(() => {
-    if (liveGpsPos) return liveGpsPos;
     if (!routeGeometry.length) return [currentOrigin.lat, currentOrigin.lng];
     const safeIdx = Math.min(currentCoordIdx, routeGeometry.length - 1);
     return routeGeometry[safeIdx];
-  }, [liveGpsPos, routeGeometry, currentCoordIdx, currentOrigin]);
+  }, [routeGeometry, currentCoordIdx, currentOrigin]);
 
   const currentHeading: number = useMemo(() => {
-    if (liveGpsHeading > 0) return liveGpsHeading;
     if (routeGeometry.length < 2) return 0;
     const nextIdx = Math.min(currentCoordIdx + 1, routeGeometry.length - 1);
     const currIdx = Math.max(0, nextIdx - 1);
     return calculateHeading(routeGeometry[currIdx], routeGeometry[nextIdx]);
-  }, [liveGpsHeading, routeGeometry, currentCoordIdx]);
+  }, [routeGeometry, currentCoordIdx]);
 
   // Dynamic Turn Guidance based on vehicle location
   const steps = displayedRoute?.steps || [];
@@ -325,7 +320,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
   );
   const currentStep = steps[currentStepIdx] || {
     instruction: 'Head towards destination',
-    roadName: 'Arterial Road',
+    roadName: 'Primary Corridor',
     distanceMeters: 350,
     durationSeconds: 60,
     type: 'depart',
@@ -350,19 +345,22 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
       lastSpokenStepRef.current = currentStepIdx;
       const announcement =
         currentStepIdx === 0
-          ? `Starting route avoiding reported flooding. In ${currentStep.distanceMeters} meters, ${currentStep.instruction}.`
+          ? `Starting route. In ${currentStep.distanceMeters} meters, ${currentStep.instruction}.`
           : `In ${currentStep.distanceMeters} meters, ${currentStep.instruction}.`;
       speakVoiceGuidance(announcement);
     }
   }, [isNavigating, voiceEnabled, currentStepIdx, currentStep]);
 
-  // Optional manual desk-testing step (moves coordinate by 1 waypoint only when user clicks)
+  // Manual Step Ahead (moves to next maneuver waypoint on demand)
   const handleManualStepAhead = () => {
     setCurrentCoordIdx((prev) => {
       const stepJump = Math.max(4, Math.floor(routeGeometry.length / Math.max(1, steps.length)));
       const next = Math.min(routeGeometry.length - 1, prev + stepJump);
       if (next >= routeGeometry.length - 1) {
         setTripCompleted(true);
+        if (voiceEnabled) {
+          speakVoiceGuidance('You have arrived at your destination.');
+        }
       }
       return next;
     });
@@ -375,14 +373,9 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
     setIsRecentered(true);
     lastSpokenStepRef.current = -1;
 
-    // Use current live GPS location if available
-    if (userLocation) {
-      setLiveGpsPos(userLocation);
-    }
-
     if (voiceEnabled && currentStep) {
       speakVoiceGuidance(
-        `Starting route avoiding reported flooding towards ${currentDestination.name}. ${currentStep.instruction}.`
+        `Starting navigation towards ${currentDestination.name}. ${currentStep.instruction}.`
       );
     }
   };
@@ -396,6 +389,19 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
     }
     if (onClearTargetDestination) {
       onClearTargetDestination();
+    }
+  };
+
+  const handleSetMyLocationOrigin = () => {
+    if (userLocation) {
+      setIsCustomMode(true);
+      setCustomOrigin({
+        id: 'live-gps',
+        name: 'My Current Location (GPS)',
+        lat: userLocation[0],
+        lng: userLocation[1],
+      });
+      if (isNavigating) handleStopNavigation();
     }
   };
 
@@ -480,7 +486,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
 
             <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-black/25 shrink-0 text-[10px] font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
-              <span>{isLiveGpsActive ? 'Live GPS Active' : 'Route Tracking'}</span>
+              <span>{isOriginLiveGps ? 'Live GPS Active' : 'Route Navigation'}</span>
             </div>
           </div>
         </div>
@@ -523,7 +529,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                 if (!customOrigin) {
                   setCustomOrigin(
                     userLocation
-                      ? { id: 'gps', name: 'My Current Location (GPS)', lat: userLocation[0], lng: userLocation[1] }
+                      ? { id: 'live-gps', name: 'My Current Location (GPS)', lat: userLocation[0], lng: userLocation[1] }
                       : PUNE_LOCALITIES[0]
                   );
                 }
@@ -553,100 +559,67 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
             </div>
 
             <div className="flex flex-col gap-2 flex-1 min-w-0">
-              {isCustomMode ? (
-                <>
-                  <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-1.5 border border-surface-container-high">
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-[10px] text-on-surface-variant font-medium">Origin</span>
-                      <select
-                        value={customOrigin?.id || (userLocation ? 'gps' : PUNE_LOCALITIES[0].id)}
-                        onChange={(e) => {
-                          if (e.target.value === 'gps' && userLocation) {
-                            setCustomOrigin({
-                              id: 'gps',
-                              name: 'My Current Location (GPS)',
-                              lat: userLocation[0],
-                              lng: userLocation[1],
-                            });
-                          } else {
-                            const loc = PUNE_LOCALITIES.find((l) => l.id === e.target.value);
-                            if (loc) setCustomOrigin(loc);
-                          }
-                        }}
-                        className="bg-transparent font-semibold text-xs text-on-surface focus:outline-hidden"
-                      >
-                        {userLocation && (
-                          <option value="gps">My Current Location (GPS)</option>
-                        )}
-                        {PUNE_LOCALITIES.map((loc) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="material-symbols-outlined text-secondary text-[18px] shrink-0">
-                      my_location
+              {/* Origin Display / Selector */}
+              <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-1.5 border border-surface-container-high">
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[10px] text-on-surface-variant font-medium">Origin</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-semibold text-xs text-on-surface truncate">
+                      {currentOrigin.name}
                     </span>
                   </div>
+                </div>
+                {userLocation && !isOriginLiveGps && (
+                  <button
+                    onClick={handleSetMyLocationOrigin}
+                    className="px-2 py-0.5 rounded-lg bg-secondary/15 hover:bg-secondary/25 text-secondary text-[10px] font-bold flex items-center gap-0.5 shrink-0 transition-colors"
+                    title="Set Origin to My Current Location"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">my_location</span>
+                    <span>Use My GPS</span>
+                  </button>
+                )}
+                {isOriginLiveGps && (
+                  <span className="material-symbols-outlined text-secondary text-[18px] shrink-0">
+                    my_location
+                  </span>
+                )}
+              </div>
 
-                  <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-1.5 border border-surface-container-high">
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-[10px] text-on-surface-variant font-medium">
-                        Destination
-                      </span>
-                      <select
-                        value={customDestination?.id || PUNE_LOCALITIES[1].id}
-                        onChange={(e) => {
-                          const loc = PUNE_LOCALITIES.find((l) => l.id === e.target.value);
-                          if (loc) setCustomDestination(loc);
-                        }}
-                        className="bg-transparent font-semibold text-xs text-on-surface focus:outline-hidden"
-                      >
-                        {customDestination && !PUNE_LOCALITIES.some((l) => l.id === customDestination.id) && (
-                          <option value={customDestination.id}>{customDestination.name}</option>
-                        )}
-                        {PUNE_LOCALITIES.map((loc) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="material-symbols-outlined text-on-surface-variant text-[18px] shrink-0">
-                      search
+              {/* Destination Display / Selector */}
+              <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-1.5 border border-surface-container-high">
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-[10px] text-on-surface-variant font-medium">
+                    Destination
+                  </span>
+                  {isCustomMode ? (
+                    <select
+                      value={customDestination?.id || PUNE_LOCALITIES[1].id}
+                      onChange={(e) => {
+                        const loc = PUNE_LOCALITIES.find((l) => l.id === e.target.value);
+                        if (loc) setCustomDestination(loc);
+                      }}
+                      className="bg-transparent font-semibold text-xs text-on-surface focus:outline-hidden"
+                    >
+                      {customDestination && !PUNE_LOCALITIES.some((l) => l.id === customDestination.id) && (
+                        <option value={customDestination.id}>{customDestination.name}</option>
+                      )}
+                      {PUNE_LOCALITIES.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-semibold text-xs text-on-surface truncate">
+                      {currentDestination.name}
                     </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-2 border border-surface-container-high">
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[10px] text-on-surface-variant font-medium">Origin</span>
-                      <span className="font-semibold text-xs text-on-surface truncate">
-                        {currentOrigin.name}
-                      </span>
-                    </div>
-                    <span className="material-symbols-outlined text-secondary text-[18px] shrink-0">
-                      my_location
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between bg-surface-container-low rounded-xl px-3 py-2 border border-surface-container-high">
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[10px] text-on-surface-variant font-medium">
-                        Destination
-                      </span>
-                      <span className="font-semibold text-xs text-on-surface truncate">
-                        {currentDestination.name}
-                      </span>
-                    </div>
-                    <span className="material-symbols-outlined text-on-surface-variant text-[18px] shrink-0">
-                      search
-                    </span>
-                  </div>
-                </>
-              )}
+                  )}
+                </div>
+                <span className="material-symbols-outlined text-on-surface-variant text-[18px] shrink-0">
+                  search
+                </span>
+              </div>
             </div>
 
             <button
@@ -688,7 +661,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
           {/* Auto-fit overview bounds when NOT navigating */}
           <RouteBoundsFitter coords={allRouteCoords} enabled={!isNavigating && allRouteCoords.length > 1} />
 
-          {/* Follows user's position while navigating */}
+          {/* Follows vehicle position while navigating */}
           <NavigationCameraController
             currentPos={currentVehicleCoord}
             isNavigating={isNavigating}
@@ -764,7 +737,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
             </>
           )}
 
-          {/* Vehicle GPS Puck Marker (Updates with User's LIVE Location) */}
+          {/* Vehicle GPS Puck Marker (ALWAYS ON THE ROUTE) */}
           {isNavigating && (
             <Marker
               position={currentVehicleCoord}
@@ -793,7 +766,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
               }`}
             >
               <span className="w-2.5 h-1.5 rounded-full bg-error"></span>
-              Direct (Blocked)
+              Direct {rerouteResult?.hasFloodingOnBaseline ? '(Blocked)' : '(Clear)'}
             </button>
           </div>
 
@@ -804,7 +777,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                 className={`p-1.5 rounded-lg flex items-center gap-1 text-[11px] font-bold ${
                   isRecentered ? 'bg-secondary text-white' : 'bg-surface-container text-on-surface'
                 }`}
-                title="Recenter camera on live position"
+                title="Recenter camera on live vehicle"
               >
                 <span className="material-symbols-outlined text-[15px]">my_location</span>
                 <span>Recenter</span>
@@ -875,11 +848,11 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                 </span>
               </button>
 
-              {/* Step Ahead Button (For desk testing without driving) */}
+              {/* Step Ahead Button (Advances along route on command) */}
               <button
                 onClick={handleManualStepAhead}
                 className="px-2.5 h-9 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface text-[11px] font-bold flex items-center justify-center gap-1 hover:bg-surface-container transition-colors"
-                title="Step forward to next turn (manual simulation)"
+                title="Step forward to next turn"
               >
                 <span className="material-symbols-outlined text-[16px]">skip_next</span>
                 <span>Next</span>
@@ -966,7 +939,9 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                     verified_user
                   </span>
                   <span className="font-bold text-sm text-on-surface truncate">
-                    Route Avoiding Reported Flooding
+                    {rerouteResult.hasFloodingOnBaseline
+                      ? 'Route Avoiding Reported Flooding'
+                      : 'Recommended Route'}
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded-full bg-secondary-container/60 text-on-secondary-container text-[10px] font-bold uppercase shrink-0">
@@ -983,9 +958,11 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                     ({rerouteResult.alternateRoute.distanceKm} km)
                   </span>
                 </div>
-                <span className="text-on-surface-variant text-[11px]">
-                  +{rerouteResult.deltaDurationMinutes} min (+{rerouteResult.deltaDistanceKm} km bypass)
-                </span>
+                {rerouteResult.hasFloodingOnBaseline && (
+                  <span className="text-on-surface-variant text-[11px]">
+                    +{rerouteResult.deltaDurationMinutes} min (+{rerouteResult.deltaDistanceKm} km bypass)
+                  </span>
+                )}
               </div>
 
               <p className="text-xs text-on-surface-variant leading-snug">
@@ -1000,24 +977,38 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
             </div>
           )}
 
-          {/* Baseline Direct Route Card (Blocked in Red) */}
+          {/* Baseline Direct Route Card (Blocked in Red if flooded, or Clean Gray if clear) */}
           {rerouteResult && (
             <div
               onClick={() => setActiveTab('baseline')}
               className={`w-full text-left rounded-2xl p-4 border transition-all cursor-pointer flex flex-col gap-2 ${
                 activeTab === 'baseline'
-                  ? 'bg-surface-container-lowest border-error shadow-md ring-1 ring-error/30'
+                  ? rerouteResult.hasFloodingOnBaseline
+                    ? 'bg-surface-container-lowest border-error shadow-md ring-1 ring-error/30'
+                    : 'bg-surface-container-lowest border-secondary shadow-md ring-1 ring-secondary/30'
                   : 'bg-surface-container-lowest border-surface-container-high hover:border-outline-variant shadow-xs'
               }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="material-symbols-outlined text-error text-[20px] shrink-0">block</span>
+                  <span
+                    className={`material-symbols-outlined text-[20px] shrink-0 ${
+                      rerouteResult.hasFloodingOnBaseline ? 'text-error' : 'text-primary'
+                    }`}
+                  >
+                    {rerouteResult.hasFloodingOnBaseline ? 'block' : 'route'}
+                  </span>
                   <span className="font-bold text-sm text-on-surface truncate">
                     Direct Shortest Route
                   </span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full bg-error-container text-on-error-container text-[10px] font-bold uppercase shrink-0">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0 ${
+                    rerouteResult.hasFloodingOnBaseline
+                      ? 'bg-error-container text-on-error-container'
+                      : 'bg-secondary-container/60 text-on-secondary-container'
+                  }`}
+                >
                   {rerouteResult.hasFloodingOnBaseline ? 'Flooded / Blocked' : 'Clear'}
                 </span>
               </div>
@@ -1031,7 +1022,11 @@ export const RerouteView: React.FC<RerouteViewProps> = ({
                 </span>
               </div>
 
-              <p className="text-xs text-error font-medium leading-snug">
+              <p
+                className={`text-xs font-medium leading-snug ${
+                  rerouteResult.hasFloodingOnBaseline ? 'text-error' : 'text-on-surface-variant'
+                }`}
+              >
                 {rerouteResult.baselineRoute.riskDescription}
               </p>
             </div>
