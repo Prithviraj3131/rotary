@@ -313,6 +313,7 @@ export const App: React.FC = () => {
                   onVoteStillFlooded={handleVoteStillFlooded}
                   onVoteCleared={handleVoteCleared}
                   onOpenAnalytics={() => setShowAnalyticsModal(true)}
+                  onOpenReroute={(_reportId) => setActiveTab('reroute')}
                 />
               </main>
             )}
