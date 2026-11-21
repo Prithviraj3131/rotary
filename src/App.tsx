@@ -31,9 +31,14 @@ import { fetchPunePrecipitation, checkForecastHotspotAlert, WeatherData } from '
 import { calculatePuneCellRisks } from './lib/predictionEngine';
 import { deliveryStateMachine, AlertDeliveryState } from './lib/deliveryStateMachine';
 import { networkState } from './lib/networkState';
+import { IncomingMeshAlertModal } from './components/common/IncomingMeshAlertModal';
+import { initMeshNetwork } from './lib/meshNetwork';
+import { handleIncomingMeshMessage } from './lib/relayEngine';
+import { OfflineQueuedMessage } from './types/relay';
 
 export const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState<boolean>(() => networkState.isOnline());
+  const [incomingMeshAlert, setIncomingMeshAlert] = useState<OfflineQueuedMessage | null>(null);
   const [topMode, setTopMode] = useState<TopMode>('consumer');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -121,6 +126,23 @@ export const App: React.FC = () => {
 
     return () => {
       unsubscribe();
+    };
+  }, []);
+
+  // Subscribe to Peer-to-Peer Mesh Network across devices on LAN / Web
+  useEffect(() => {
+    const unsubMesh = initMeshNetwork(
+      (incomingMsg) => {
+        handleIncomingMeshMessage(incomingMsg);
+        setIncomingMeshAlert(incomingMsg);
+      },
+      (incomingReport) => {
+        localReportsStore.upsert(incomingReport);
+      }
+    );
+
+    return () => {
+      unsubMesh();
     };
   }, []);
 
@@ -465,6 +487,16 @@ export const App: React.FC = () => {
         reports={reports}
         onSelectRoute={(_id) => {
           setActiveTab('reroute');
+        }}
+      />
+
+      {/* Incoming Peer Mesh Alert Popup */}
+      <IncomingMeshAlertModal
+        message={incomingMeshAlert}
+        onClose={() => setIncomingMeshAlert(null)}
+        onOpenMeshHub={() => {
+          setIncomingMeshAlert(null);
+          setActiveTab('offline');
         }}
       />
     </div>

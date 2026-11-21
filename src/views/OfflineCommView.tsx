@@ -6,6 +6,7 @@ import {
   simulatePeerMeshExchange,
 } from '../lib/relayEngine';
 import { OfflineQueuedMessage } from '../types/relay';
+import { getDeviceId, getMeshRelayUrl, setMeshRelayUrl } from '../lib/meshNetwork';
 
 const TAGS = ['Family', 'Neighbors', 'Relief Team'];
 const QUICK_CHIPS = [
@@ -25,6 +26,9 @@ export const OfflineCommView: React.FC = () => {
   const [messageText, setMessageText] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [relayUrl, setRelayUrlState] = useState<string>(() => getMeshRelayUrl());
+  const [isEditingRelay, setIsEditingRelay] = useState(false);
+  const [tempRelayUrl, setTempRelayUrl] = useState('');
 
   useEffect(() => {
     const unsub = subscribeQueuedMessages((data) => {
@@ -46,7 +50,7 @@ export const OfflineCommView: React.FC = () => {
 
     setMessageText('');
     setIsComposing(false);
-    setToastMessage('✓ Message encrypted & stored in IndexedDB. Ready for peer-to-peer BLE broadcast.');
+    setToastMessage('✓ Message broadcast across LAN mesh & stored in IndexedDB. Nearby peers alerted!');
     setTimeout(() => setToastMessage(null), 4000);
   };
 
@@ -107,6 +111,56 @@ export const OfflineCommView: React.FC = () => {
               <span className="material-symbols-outlined text-[13px] text-primary">inventory_2</span>
               <span className="text-xs font-bold text-on-surface">{messages.length} Packets</span>
             </div>
+          </div>
+        </div>
+
+        {/* Node & Relay Hub Connectivity Strip */}
+        <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-surface-container border border-surface-container-high text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-on-surface-variant font-medium">
+              This Node: <strong className="text-on-surface font-mono">{getDeviceId()}</strong>
+            </span>
+            <span className="flex items-center gap-1 text-[10px] text-secondary font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
+              Live Peer Mesh
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-on-surface-variant pt-1 border-t border-surface-container-high">
+            <span>Relay Hub: <strong className="text-primary font-mono">{relayUrl}</strong></span>
+            {!isEditingRelay ? (
+              <button
+                onClick={() => {
+                  setTempRelayUrl(relayUrl);
+                  setIsEditingRelay(true);
+                }}
+                className="text-[10px] text-primary hover:underline font-semibold"
+              >
+                Change IP
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={tempRelayUrl}
+                  onChange={(e) => setTempRelayUrl(e.target.value)}
+                  className="px-1.5 py-0.5 rounded bg-surface-container-lowest border border-surface-container-highest text-[10px] font-mono text-on-surface w-32"
+                  placeholder="http://192.168.1.2:3000"
+                />
+                <button
+                  onClick={() => {
+                    if (tempRelayUrl.trim()) {
+                      setMeshRelayUrl(tempRelayUrl.trim());
+                      setRelayUrlState(tempRelayUrl.trim());
+                    }
+                    setIsEditingRelay(false);
+                  }}
+                  className="px-1.5 py-0.5 rounded bg-primary text-on-primary text-[10px] font-bold"
+                >
+                  Save
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -329,9 +383,10 @@ export const OfflineCommView: React.FC = () => {
                 </p>
 
                 <div className="flex items-center justify-between text-[10px] text-on-surface-variant pt-1 border-t border-surface-container-high/60">
-                  <span>Hops: {msg.hopsTraveled} / 6 max</span>
+                  <span>Node: <strong className="text-on-surface font-mono">{msg.senderId || 'This Device'}</strong></span>
+                  <span>Hops: {msg.hopsTraveled} / 6</span>
                   <span>TTL: {msg.expiryHours}h</span>
-                  <span className="font-mono text-secondary font-semibold">Ed25519 Signed</span>
+                  <span className="font-mono text-secondary font-semibold">Ed25519</span>
                 </div>
               </div>
             ))

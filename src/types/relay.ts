@@ -31,4 +31,6 @@ export interface OfflineQueuedMessage {
   status: 'queued_local' | 'relayed_mesh' | 'synced_server';
   hopsTraveled: number;
   peerRelayCount: number;
+  senderId?: string;
+  senderDevice?: string;
 }

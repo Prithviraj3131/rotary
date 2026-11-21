@@ -1,5 +1,6 @@
 import { AlertPacket, OfflineQueuedMessage } from '../types/relay';
 import { saveOfflineMessageIDB, getOfflineMessagesIDB } from './idb';
+import { getDeviceId, getDeviceName, broadcastMeshMessage } from './meshNetwork';
 
 // Local seen-set of alert IDs with expiry timestamps to drop duplicates (Rule 3)
 const seenAlerts = new Map<string, number>();
@@ -129,6 +130,8 @@ export async function queueOfflineMessage(
     status: 'queued_local',
     hopsTraveled: 0,
     peerRelayCount: 0,
+    senderId: getDeviceId(),
+    senderDevice: getDeviceName(),
   };
 
   localMessagesCache.unshift(msg);
@@ -140,7 +143,34 @@ export async function queueOfflineMessage(
     console.warn('Could not persist offline message to IDB:', err);
   }
 
+  // Broadcast to all nearby nodes via LAN Relay & Cross-tab
+  broadcastMeshMessage(msg).catch(() => {});
+
   return msg;
+}
+
+/**
+ * Handles incoming mesh message received from a peer device over the network
+ */
+export async function handleIncomingMeshMessage(incoming: OfflineQueuedMessage): Promise<void> {
+  if (!incoming || !incoming.id) return;
+  if (localMessagesCache.some((m) => m.id === incoming.id)) return;
+
+  const peerMsg: OfflineQueuedMessage = {
+    ...incoming,
+    status: 'relayed_mesh',
+    hopsTraveled: (incoming.hopsTraveled ?? 0) + 1,
+    peerRelayCount: (incoming.peerRelayCount ?? 0) + 1,
+  };
+
+  localMessagesCache.unshift(peerMsg);
+  notify();
+
+  try {
+    await saveOfflineMessageIDB(peerMsg);
+  } catch (err) {
+    console.warn('Could not persist incoming peer message to IDB:', err);
+  }
 }
 
 /**

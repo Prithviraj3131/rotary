@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured, localReportsStore } from './supabase';
 import { ReportRow } from '../types/database';
+import { broadcastMeshReport } from './meshNetwork';
 
 // BroadcastChannel for instant multi-tab sync when running in mock / PWA offline mode
 const BROADCAST_CHANNEL_NAME = 'floodguard_pune_realtime';
@@ -82,6 +83,9 @@ export async function broadcastReportUpsert(report: ReportRow): Promise<void> {
       payload: report,
     });
   }
+
+  // Broadcast across LAN mesh
+  broadcastMeshReport(report).catch(() => {});
 
   // Sync to remote Supabase if active
   if (isSupabaseConfigured && supabase) {
