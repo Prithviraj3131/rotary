@@ -7,13 +7,17 @@ import {
   PUNE_LOCALITIES,
   calculateAvoidanceRoute,
   PunePresetRoute,
-  PuneLocality
+  PuneLocality,
 } from '../lib/routingService';
 import { RerouteResult, RouteStep } from '../types/routing';
 import { DemoBadge } from '../components/common/DemoBadge';
+import { calculateDistanceMeters } from '../lib/geoUtils';
 
 interface RerouteViewProps {
   reports: ReportRow[];
+  userLocation?: [number, number] | null;
+  targetDestination?: { name: string; lat: number; lng: number } | null;
+  onClearTargetDestination?: () => void;
   onOpenMap: () => void;
 }
 
@@ -58,7 +62,7 @@ const createVehicleIcon = (headingDeg: number = 0) =>
     className: 'custom-vehicle-puck',
     html: `
       <div style="position: relative; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
-        <div style="position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(0, 108, 75, 0.28); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+        <div style="position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(0, 108, 75, 0.3); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
         <div style="width: 26px; height: 26px; border-radius: 50%; background: #006c4b; border: 3px solid #ffffff; box-shadow: 0 3px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; transform: rotate(${headingDeg}deg); transition: transform 0.25s linear;">
           <span class="material-symbols-outlined" style="color: white; font-size: 18px; margin-top: -2px; font-variation-settings: 'FILL' 1;">navigation</span>
         </div>
@@ -68,7 +72,7 @@ const createVehicleIcon = (headingDeg: number = 0) =>
     iconAnchor: [19, 19],
   });
 
-// Auto-fit bounds on initial overview
+// Auto-fit bounds on initial route overview
 const RouteBoundsFitter: React.FC<{ coords: [number, number][]; enabled: boolean }> = ({
   coords,
   enabled,
@@ -83,7 +87,7 @@ const RouteBoundsFitter: React.FC<{ coords: [number, number][]; enabled: boolean
   return null;
 };
 
-// Auto-center camera on vehicle while navigating
+// Auto-center camera on vehicle while navigating (Follow-Me Mode)
 const NavigationCameraController: React.FC<{
   currentPos: [number, number];
   isNavigating: boolean;
@@ -92,7 +96,7 @@ const NavigationCameraController: React.FC<{
   const map = useMap();
   useEffect(() => {
     if (isNavigating && isRecentered && currentPos) {
-      map.setView(currentPos, 16, { animate: true });
+      map.setView(currentPos, 16, { animate: true, duration: 0.5 });
     }
   }, [currentPos, isNavigating, isRecentered, map]);
   return null;
@@ -135,7 +139,13 @@ function speakVoiceGuidance(text: string) {
   }
 }
 
-export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) => {
+export const RerouteView: React.FC<RerouteViewProps> = ({
+  reports,
+  userLocation,
+  targetDestination,
+  onClearTargetDestination,
+  onOpenMap,
+}) => {
   const [selectedPresetId, setSelectedPresetId] = useState<string>(PRESET_PUNE_ROUTES[0].id);
   const [customOrigin, setCustomOrigin] = useState<PuneLocality | null>(null);
   const [customDestination, setCustomDestination] = useState<PuneLocality | null>(null);
@@ -145,16 +155,39 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
   const [activeTab, setActiveTab] = useState<'alternate' | 'baseline'>('alternate');
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // --- Google Maps Navigation Mode States ---
+  // --- Live Google Maps GPS Navigation State ---
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
-  const [isSimulating, setIsSimulating] = useState<boolean>(true);
-  const [simSpeed, setSimSpeed] = useState<1 | 2 | 4>(1);
+  const [liveGpsPos, setLiveGpsPos] = useState<[number, number] | null>(null);
+  const [liveGpsHeading, setLiveGpsHeading] = useState<number>(0);
+  const [isLiveGpsActive, setIsLiveGpsActive] = useState<boolean>(true);
+  const [currentCoordIdx, setCurrentCoordIdx] = useState<number>(0);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isRecentered, setIsRecentered] = useState<boolean>(true);
-  const [currentCoordIdx, setCurrentCoordIdx] = useState<number>(0);
   const [tripCompleted, setTripCompleted] = useState<boolean>(false);
 
   const lastSpokenStepRef = useRef<number>(-1);
+
+  // When a destination is targeted externally (e.g., from SheltersView "Directions")
+  useEffect(() => {
+    if (targetDestination) {
+      setIsCustomMode(true);
+      setCustomDestination({
+        id: 'shelter-dest',
+        name: targetDestination.name,
+        lat: targetDestination.lat,
+        lng: targetDestination.lng,
+      });
+
+      if (userLocation) {
+        setCustomOrigin({
+          id: 'user-live-loc',
+          name: 'Your Current Location (GPS)',
+          lat: userLocation[0],
+          lng: userLocation[1],
+        });
+      }
+    }
+  }, [targetDestination, userLocation]);
 
   // Active Origin & Destination
   const activePreset: PunePresetRoute =
@@ -168,6 +201,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
     ? { name: customDestination.name, lat: customDestination.lat, lng: customDestination.lng }
     : activePreset.destination;
 
+  // Fetch Route from OSRM
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
@@ -199,21 +233,90 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
 
   const routeGeometry = displayedRoute?.geometry || [];
 
-  // Current vehicle coordinate & heading
+  // =========================================================================
+  // REAL-TIME GPS TRACKING WITH NAVIGATOR.GEOLOCATION.WATCHPOSITION
+  // (Moves strictly with the user's actual live position, like Google Maps!)
+  // =========================================================================
+  useEffect(() => {
+    if (!isNavigating) return;
+
+    let watchId: number | null = null;
+
+    if ('geolocation' in navigator) {
+      setIsLiveGpsActive(true);
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const uLat = pos.coords.latitude;
+          const uLng = pos.coords.longitude;
+          setLiveGpsPos([uLat, uLng]);
+
+          // Heading
+          if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+            setLiveGpsHeading(pos.coords.heading);
+          } else if (liveGpsPos) {
+            setLiveGpsHeading(calculateHeading(liveGpsPos, [uLat, uLng]));
+          }
+
+          // Map user location to closest route coordinate
+          if (routeGeometry.length > 0) {
+            let minD = Infinity;
+            let closest = 0;
+            for (let i = 0; i < routeGeometry.length; i++) {
+              const d = calculateDistanceMeters(uLat, uLng, routeGeometry[i][0], routeGeometry[i][1]);
+              if (d < minD) {
+                minD = d;
+                closest = i;
+              }
+            }
+            setCurrentCoordIdx(closest);
+
+            // Check if user reached destination (< 35m)
+            const destD = calculateDistanceMeters(
+              uLat,
+              uLng,
+              currentDestination.lat,
+              currentDestination.lng
+            );
+            if (destD < 35) {
+              setTripCompleted(true);
+              if (voiceEnabled) {
+                speakVoiceGuidance('You have arrived at your destination.');
+              }
+            }
+          }
+        },
+        (err) => {
+          console.warn('Live GPS watch error (fallback to route point):', err);
+          setIsLiveGpsActive(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 8000 }
+      );
+    }
+
+    return () => {
+      if (watchId !== null && 'geolocation' in navigator) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [isNavigating, routeGeometry, currentDestination, voiceEnabled, liveGpsPos]);
+
+  // Current vehicle marker coordinate (defaults to real GPS or selected route point)
   const currentVehicleCoord: [number, number] = useMemo(() => {
+    if (liveGpsPos) return liveGpsPos;
     if (!routeGeometry.length) return [currentOrigin.lat, currentOrigin.lng];
     const safeIdx = Math.min(currentCoordIdx, routeGeometry.length - 1);
     return routeGeometry[safeIdx];
-  }, [routeGeometry, currentCoordIdx, currentOrigin]);
+  }, [liveGpsPos, routeGeometry, currentCoordIdx, currentOrigin]);
 
   const currentHeading: number = useMemo(() => {
+    if (liveGpsHeading > 0) return liveGpsHeading;
     if (routeGeometry.length < 2) return 0;
     const nextIdx = Math.min(currentCoordIdx + 1, routeGeometry.length - 1);
     const currIdx = Math.max(0, nextIdx - 1);
     return calculateHeading(routeGeometry[currIdx], routeGeometry[nextIdx]);
-  }, [routeGeometry, currentCoordIdx]);
+  }, [liveGpsHeading, routeGeometry, currentCoordIdx]);
 
-  // Turn-by-turn guidance tracking
+  // Dynamic Turn Guidance based on vehicle location
   const steps = displayedRoute?.steps || [];
   const progressRatio = routeGeometry.length > 1 ? currentCoordIdx / (routeGeometry.length - 1) : 0;
   const currentStepIdx = Math.min(
@@ -223,13 +326,12 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
   const currentStep = steps[currentStepIdx] || {
     instruction: 'Head towards destination',
     roadName: 'Arterial Road',
-    distanceMeters: 400,
+    distanceMeters: 350,
     durationSeconds: 60,
     type: 'depart',
   };
   const nextStep = steps[currentStepIdx + 1];
 
-  // Dynamic remaining metrics
   const remainingDistanceKm = displayedRoute
     ? Math.max(0.1, Number((displayedRoute.distanceKm * (1 - progressRatio)).toFixed(1)))
     : 0;
@@ -237,35 +339,12 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
     ? Math.max(1, Math.round(displayedRoute.durationMinutes * (1 - progressRatio)))
     : 0;
 
-  // Compute live ETA formatted timestamp
   const etaFormatted = useMemo(() => {
     const d = new Date(Date.now() + remainingMinutes * 60000);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }, [remainingMinutes]);
 
-  // Driving Simulation Loop
-  useEffect(() => {
-    if (!isNavigating || !isSimulating || tripCompleted) return;
-
-    const intervalMs = Math.max(120, Math.floor(450 / simSpeed));
-    const timer = setInterval(() => {
-      setCurrentCoordIdx((prev) => {
-        if (prev + 1 >= routeGeometry.length) {
-          setTripCompleted(true);
-          setIsSimulating(false);
-          if (voiceEnabled) {
-            speakVoiceGuidance('You have arrived at your destination.');
-          }
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [isNavigating, isSimulating, simSpeed, routeGeometry.length, tripCompleted, voiceEnabled]);
-
-  // Voice Guidance Trigger on Step Change
+  // Voice Guidance Trigger on Turn change
   useEffect(() => {
     if (isNavigating && voiceEnabled && currentStepIdx !== lastSpokenStepRef.current) {
       lastSpokenStepRef.current = currentStepIdx;
@@ -277,13 +356,29 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
     }
   }, [isNavigating, voiceEnabled, currentStepIdx, currentStep]);
 
+  // Optional manual desk-testing step (moves coordinate by 1 waypoint only when user clicks)
+  const handleManualStepAhead = () => {
+    setCurrentCoordIdx((prev) => {
+      const stepJump = Math.max(4, Math.floor(routeGeometry.length / Math.max(1, steps.length)));
+      const next = Math.min(routeGeometry.length - 1, prev + stepJump);
+      if (next >= routeGeometry.length - 1) {
+        setTripCompleted(true);
+      }
+      return next;
+    });
+  };
+
   const handleStartNavigation = () => {
     setIsNavigating(true);
     setCurrentCoordIdx(0);
     setTripCompleted(false);
-    setIsSimulating(true);
     setIsRecentered(true);
     lastSpokenStepRef.current = -1;
+
+    // Use current live GPS location if available
+    if (userLocation) {
+      setLiveGpsPos(userLocation);
+    }
 
     if (voiceEnabled && currentStep) {
       speakVoiceGuidance(
@@ -294,11 +389,13 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
 
   const handleStopNavigation = () => {
     setIsNavigating(false);
-    setIsSimulating(false);
     setTripCompleted(false);
     setCurrentCoordIdx(0);
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
+    }
+    if (onClearTargetDestination) {
+      onClearTargetDestination();
     }
   };
 
@@ -366,7 +463,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
             </button>
           </div>
 
-          {/* Secondary Next Turn Preview & Active Avoidance Badge */}
+          {/* Real-time Status Badge & Next Turn Preview */}
           <div className="flex items-center justify-between pt-2 border-t border-white/20 text-xs text-white/90">
             <div className="flex items-center gap-1.5 truncate">
               {nextStep ? (
@@ -381,9 +478,9 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
               )}
             </div>
 
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/20 shrink-0 text-[10px] font-bold">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
-              <span>Avoiding Flooded Corridor</span>
+            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-black/25 shrink-0 text-[10px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
+              <span>{isLiveGpsActive ? 'Live GPS Active' : 'Route Tracking'}</span>
             </div>
           </div>
         </div>
@@ -423,7 +520,13 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
             <button
               onClick={() => {
                 setIsCustomMode(true);
-                if (!customOrigin) setCustomOrigin(PUNE_LOCALITIES[0]);
+                if (!customOrigin) {
+                  setCustomOrigin(
+                    userLocation
+                      ? { id: 'gps', name: 'My Current Location (GPS)', lat: userLocation[0], lng: userLocation[1] }
+                      : PUNE_LOCALITIES[0]
+                  );
+                }
                 if (!customDestination) setCustomDestination(PUNE_LOCALITIES[1]);
               }}
               className={`px-2.5 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition-all ${
@@ -456,13 +559,25 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
                     <div className="flex flex-col min-w-0 flex-1">
                       <span className="text-[10px] text-on-surface-variant font-medium">Origin</span>
                       <select
-                        value={customOrigin?.id || PUNE_LOCALITIES[0].id}
+                        value={customOrigin?.id || (userLocation ? 'gps' : PUNE_LOCALITIES[0].id)}
                         onChange={(e) => {
-                          const loc = PUNE_LOCALITIES.find((l) => l.id === e.target.value);
-                          if (loc) setCustomOrigin(loc);
+                          if (e.target.value === 'gps' && userLocation) {
+                            setCustomOrigin({
+                              id: 'gps',
+                              name: 'My Current Location (GPS)',
+                              lat: userLocation[0],
+                              lng: userLocation[1],
+                            });
+                          } else {
+                            const loc = PUNE_LOCALITIES.find((l) => l.id === e.target.value);
+                            if (loc) setCustomOrigin(loc);
+                          }
                         }}
                         className="bg-transparent font-semibold text-xs text-on-surface focus:outline-hidden"
                       >
+                        {userLocation && (
+                          <option value="gps">My Current Location (GPS)</option>
+                        )}
                         {PUNE_LOCALITIES.map((loc) => (
                           <option key={loc.id} value={loc.id}>
                             {loc.name}
@@ -488,6 +603,9 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
                         }}
                         className="bg-transparent font-semibold text-xs text-on-surface focus:outline-hidden"
                       >
+                        {customDestination && !PUNE_LOCALITIES.some((l) => l.id === customDestination.id) && (
+                          <option value={customDestination.id}>{customDestination.name}</option>
+                        )}
                         {PUNE_LOCALITIES.map((loc) => (
                           <option key={loc.id} value={loc.id}>
                             {loc.name}
@@ -570,7 +688,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
           {/* Auto-fit overview bounds when NOT navigating */}
           <RouteBoundsFitter coords={allRouteCoords} enabled={!isNavigating && allRouteCoords.length > 1} />
 
-          {/* Camera follower when navigating */}
+          {/* Follows user's position while navigating */}
           <NavigationCameraController
             currentPos={currentVehicleCoord}
             isNavigating={isNavigating}
@@ -646,7 +764,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
             </>
           )}
 
-          {/* Vehicle GPS Navigation Puck Marker (When Navigating) */}
+          {/* Vehicle GPS Puck Marker (Updates with User's LIVE Location) */}
           {isNavigating && (
             <Marker
               position={currentVehicleCoord}
@@ -686,7 +804,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
                 className={`p-1.5 rounded-lg flex items-center gap-1 text-[11px] font-bold ${
                   isRecentered ? 'bg-secondary text-white' : 'bg-surface-container text-on-surface'
                 }`}
-                title="Recenter camera on vehicle"
+                title="Recenter camera on live position"
               >
                 <span className="material-symbols-outlined text-[15px]">my_location</span>
                 <span>Recenter</span>
@@ -726,7 +844,7 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
             ></div>
           </div>
 
-          {/* ETA Metrics & Controls */}
+          {/* ETA Metrics & Real-time Controls */}
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <div className="flex items-baseline gap-1.5">
@@ -757,36 +875,14 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
                 </span>
               </button>
 
-              {/* Simulation Play / Pause */}
+              {/* Step Ahead Button (For desk testing without driving) */}
               <button
-                onClick={() => setIsSimulating(!isSimulating)}
-                className="w-9 h-9 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface flex items-center justify-center hover:bg-surface-container transition-colors"
-                title={isSimulating ? 'Pause driving simulation' : 'Resume driving simulation'}
+                onClick={handleManualStepAhead}
+                className="px-2.5 h-9 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface text-[11px] font-bold flex items-center justify-center gap-1 hover:bg-surface-container transition-colors"
+                title="Step forward to next turn (manual simulation)"
               >
-                <span className="material-symbols-outlined text-[20px]">
-                  {isSimulating ? 'pause' : 'play_arrow'}
-                </span>
-              </button>
-
-              {/* Speed Multiplier (1x / 2x / 4x) */}
-              <button
-                onClick={() => setSimSpeed(simSpeed === 1 ? 2 : simSpeed === 2 ? 4 : 1)}
-                className="px-2 h-9 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface text-xs font-bold flex items-center justify-center hover:bg-surface-container transition-colors"
-                title="Simulation Speed"
-              >
-                {simSpeed}x
-              </button>
-
-              {/* Step Ahead / Skip Turn */}
-              <button
-                onClick={() => {
-                  const stepJump = Math.max(3, Math.floor(routeGeometry.length / Math.max(1, steps.length)));
-                  setCurrentCoordIdx((prev) => Math.min(routeGeometry.length - 1, prev + stepJump));
-                }}
-                className="w-9 h-9 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface flex items-center justify-center hover:bg-surface-container transition-colors"
-                title="Jump to next maneuver"
-              >
-                <span className="material-symbols-outlined text-[18px]">skip_next</span>
+                <span className="material-symbols-outlined text-[16px]">skip_next</span>
+                <span>Next</span>
               </button>
 
               {/* End Trip */}

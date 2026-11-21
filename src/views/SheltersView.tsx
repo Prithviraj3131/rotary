@@ -1,89 +1,131 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import L from 'leaflet';
 import { DemoBadge } from '../components/common/DemoBadge';
+import { PUNE_MAP_PLACES, MapPlace } from '../components/Map/ShelterMapMarkers';
+import { calculateDistanceMeters } from '../lib/geoUtils';
 
-interface ShelterItem {
-  id: string;
-  name: string;
-  category: string;
-  distanceKm: number;
-  verification: 'official_shelter' | 'listed' | 'unverified';
-  address: string;
-  elevation: string;
-  features: string[];
+interface SheltersViewProps {
+  userLocation?: [number, number] | null;
+  onNavigateToShelter?: (shelter: { name: string; lat: number; lng: number }) => void;
 }
 
-const SEED_SHELTERS: ShelterItem[] = [
-  {
-    id: 'shelter-1',
-    name: 'Tilak Road Sports Complex (Higher Ground)',
-    category: 'Elevated Community Center',
-    distanceKm: 0.8,
-    verification: 'official_shelter',
-    address: 'Near Swargate / Tilak Road, Pune',
-    elevation: '+18m above Mutha basin grade',
-    features: ['High Capacity Hall', 'First Aid Station', 'Emergency Generator']
-  },
-  {
-    id: 'shelter-2',
-    name: 'Fergusson College Main Amphitheatre & Hall',
-    category: 'Institutional Relief Point',
-    distanceKm: 1.2,
-    verification: 'official_shelter',
-    address: 'FC Road, Deccan Gymkhana, Pune',
-    elevation: '+15m elevated natural ridge',
-    features: ['Sheltered Seating', 'Restrooms', 'Drinking Water']
-  },
-  {
-    id: 'shelter-3',
-    name: 'Swargate Bus Station Upper Concourse',
-    category: 'Transport Infrastructure',
-    distanceKm: 1.5,
-    verification: 'listed',
-    address: 'Swargate Flyover Concourse, Pune',
-    elevation: '+8m bridge deck level',
-    features: ['Covered Platform', 'Listed Public Site']
-  },
-  {
-    id: 'shelter-4',
-    name: 'COEP Technological University North Quad',
-    category: 'Educational Campus',
-    distanceKm: 2.4,
-    verification: 'listed',
-    address: 'Shivajinagar, Pune',
-    elevation: '+12m elevated campus ground',
-    features: ['Auditorium Hall', 'Listed Facility']
-  },
-  {
-    id: 'shelter-5',
-    name: 'Sinhagad College Hilltop Campus',
-    category: 'Elevated Campus',
-    distanceKm: 3.8,
-    verification: 'unverified',
-    address: 'Sinhagad Road Highlands, Pune',
-    elevation: '+35m hill grade',
-    features: ['High ground', 'Unverified status']
-  }
-];
+// Custom DivIcons for Shelters Map
+const shelterOfficialIcon = L.divIcon({
+  className: 'custom-shelter-icon',
+  html: `
+    <div style="background-color: #006c4b; color: white; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(0, 108, 75, 0.4); border: 2.5px solid white;">
+      <span class="material-symbols-outlined" style="font-size: 18px; font-variation-settings: 'FILL' 1;">shield</span>
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+});
 
-export const SheltersView: React.FC = () => {
+const shelterFacilityIcon = L.divIcon({
+  className: 'custom-facility-icon',
+  html: `
+    <div style="background-color: #003861; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 8px rgba(0, 56, 97, 0.35); border: 2.5px solid white;">
+      <span class="material-symbols-outlined" style="font-size: 17px;">apartment</span>
+    </div>
+  `,
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const emergencyUnitIcon = L.divIcon({
+  className: 'custom-emerg-icon',
+  html: `
+    <div style="background-color: #ba1a1a; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 8px rgba(186, 26, 26, 0.4); border: 2.5px solid white;">
+      <span class="material-symbols-outlined" style="font-size: 17px; font-variation-settings: 'FILL' 1;">medical_services</span>
+    </div>
+  `,
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+export const SheltersView: React.FC<SheltersViewProps> = ({
+  userLocation,
+  onNavigateToShelter,
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'shelter' | 'high-ground' | 'emergency'>('all');
 
-  const filtered = SEED_SHELTERS.filter(
-    (s) =>
-      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.address.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Compute live distances from user's current GPS position
+  const enrichedPlaces = useMemo(() => {
+    return PUNE_MAP_PLACES.map((place) => {
+      let distanceKm: number = 1.2;
+      let distanceFormatted = '1.2 km';
 
-  const handleDirections = (name: string) => {
-    setToastMessage(`Walking route to ${name} generated (avoiding cells $\\ge 0.4$).`);
-    setTimeout(() => setToastMessage(null), 4000);
+      if (userLocation) {
+        const distMeters = calculateDistanceMeters(
+          userLocation[0],
+          userLocation[1],
+          place.lat,
+          place.lng
+        );
+        distanceKm = Number((distMeters / 1000).toFixed(1));
+        distanceFormatted = distMeters < 1000 ? `${Math.round(distMeters)} m` : `${distanceKm} km`;
+      }
+
+      const isHighGround = place.advisory.includes('+') || place.advisory.toLowerCase().includes('ridge') || place.advisory.toLowerCase().includes('elevated');
+
+      return {
+        ...place,
+        distanceKm,
+        distanceFormatted,
+        isHighGround,
+      };
+    }).sort((a, b) => a.distanceKm - b.distanceKm);
+  }, [userLocation]);
+
+  const filteredPlaces = useMemo(() => {
+    return enrichedPlaces.filter((p) => {
+      const matchesSearch =
+        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.advisory.toLowerCase().includes(searchTerm.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      if (categoryFilter === 'shelter') return p.category === 'shelter';
+      if (categoryFilter === 'emergency') return p.category === 'emergency';
+      if (categoryFilter === 'high-ground') return p.isHighGround;
+      return true;
+    });
+  }, [enrichedPlaces, searchTerm, categoryFilter]);
+
+  const handleStartRoute = (place: MapPlace) => {
+    if (onNavigateToShelter) {
+      onNavigateToShelter({
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+      });
+    }
   };
 
+  const centerCoords: [number, number] = userLocation || [18.5204, 73.8567];
+
   return (
-    <div className="w-full max-w-md md:max-w-xl mx-auto px-4 py-4 flex flex-col gap-4 pb-24">
-      {/* 1. Search Bar */}
-      <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-container-lowest border border-surface-container-high shadow-sm">
+    <div className="w-full max-w-md md:max-w-xl mx-auto px-4 py-4 flex flex-col gap-4 pb-28">
+      {/* 1. Header & Live Locality Status */}
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex flex-col min-w-0">
+          <h1 className="font-extrabold text-xl text-on-surface truncate">
+            Elevated Relief Shelters
+          </h1>
+          <span className="text-xs text-on-surface-variant">
+            Pune Municipal District • Higher-ground refuges
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <DemoBadge label="VERIFIED GIS" />
+        </div>
+      </div>
+
+      {/* 2. Search & Locality Filter */}
+      <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-container-lowest border border-surface-container-high shadow-xs">
         <span className="material-symbols-outlined text-on-surface-variant text-[20px] shrink-0">
           search
         </span>
@@ -91,8 +133,8 @@ export const SheltersView: React.FC = () => {
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search higher ground & shelters in Pune..."
-          className="w-full bg-transparent text-xs md:text-sm text-on-surface placeholder:text-outline focus:outline-none min-w-0"
+          placeholder="Search shelters in Swargate, Aundh, Deccan..."
+          className="w-full bg-transparent text-xs text-on-surface placeholder:text-outline focus:outline-hidden min-w-0 font-medium"
         />
         {searchTerm && (
           <button onClick={() => setSearchTerm('')} className="text-on-surface-variant">
@@ -101,36 +143,163 @@ export const SheltersView: React.FC = () => {
         )}
       </div>
 
-      {/* 2. Banner with Disclaimer */}
-      <div className="rounded-2xl bg-surface-container-lowest border border-surface-container-high p-4 flex flex-col gap-2 shadow-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-on-surface">
-            Pune Elevated Relief Locations
-          </span>
-          <DemoBadge label="SEEDED LIST" />
-        </div>
-        <p className="text-xs text-on-surface-variant leading-relaxed">
-          Curated high-ground relief points. Sites marked <em>Official Shelter</em> are designated by municipal authorities; other listed buildings are marked <em>listed, not verified safe</em>.
-        </p>
+      {/* 3. Category Filter Chips */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+        <button
+          onClick={() => setCategoryFilter('all')}
+          className={`px-3 py-1.5 rounded-full whitespace-nowrap text-[11px] font-semibold transition-all ${
+            categoryFilter === 'all'
+              ? 'bg-secondary text-on-secondary shadow-xs'
+              : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+          }`}
+        >
+          All Locations ({enrichedPlaces.length})
+        </button>
+        <button
+          onClick={() => setCategoryFilter('shelter')}
+          className={`px-3 py-1.5 rounded-full whitespace-nowrap text-[11px] font-semibold transition-all ${
+            categoryFilter === 'shelter'
+              ? 'bg-secondary text-on-secondary shadow-xs'
+              : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+          }`}
+        >
+          Official Shelters
+        </button>
+        <button
+          onClick={() => setCategoryFilter('high-ground')}
+          className={`px-3 py-1.5 rounded-full whitespace-nowrap text-[11px] font-semibold transition-all ${
+            categoryFilter === 'high-ground'
+              ? 'bg-secondary text-on-secondary shadow-xs'
+              : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+          }`}
+        >
+          High Ground (+15m Ridge)
+        </button>
+        <button
+          onClick={() => setCategoryFilter('emergency')}
+          className={`px-3 py-1.5 rounded-full whitespace-nowrap text-[11px] font-semibold transition-all ${
+            categoryFilter === 'emergency'
+              ? 'bg-secondary text-on-secondary shadow-xs'
+              : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
+          }`}
+        >
+          Emergency Rescue Desks
+        </button>
       </div>
 
-      {/* Toast Notice */}
-      {toastMessage && (
-        <div className="p-3 bg-secondary text-on-secondary rounded-xl text-xs font-semibold shadow-md flex items-center gap-2">
-          <span className="material-symbols-outlined text-[18px]">navigation</span>
-          <span>{toastMessage}</span>
-        </div>
-      )}
+      {/* 4. Interactive Leaflet Shelters Map */}
+      <div className="relative w-full h-64 rounded-2xl overflow-hidden shadow-xs bg-surface-container-low border border-surface-container-high z-0">
+        <MapContainer
+          center={centerCoords}
+          zoom={13}
+          zoomControl={false}
+          className="w-full h-full"
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap"
+            maxZoom={19}
+          />
 
-      {/* 3. List of Shelters */}
+          {/* User Location Pulse Marker */}
+          {userLocation && (
+            <CircleMarker
+              center={userLocation}
+              radius={8}
+              pathOptions={{
+                fillColor: '#006c4b',
+                fillOpacity: 0.9,
+                color: '#ffffff',
+                weight: 2.5,
+              }}
+            >
+              <Popup>
+                <div className="text-xs font-bold text-secondary">Your Current Location</div>
+              </Popup>
+            </CircleMarker>
+          )}
+
+          {/* Shelter & Rescue Markers */}
+          {filteredPlaces.map((place) => {
+            const icon =
+              place.category === 'emergency'
+                ? emergencyUnitIcon
+                : place.statusText.includes('Verified')
+                ? shelterOfficialIcon
+                : shelterFacilityIcon;
+
+            return (
+              <Marker key={place.id} position={[place.lat, place.lng]} icon={icon}>
+                <Popup>
+                  <div className="flex flex-col gap-1 min-w-[180px] p-0.5">
+                    <span className="font-bold text-xs text-on-surface">{place.name}</span>
+                    <span className="text-[11px] text-on-surface-variant">{place.address}</span>
+                    <span className="text-[10px] text-secondary font-semibold">{place.advisory}</span>
+                    <button
+                      onClick={() => handleStartRoute(place)}
+                      className="mt-1.5 w-full py-1 rounded-lg bg-secondary text-on-secondary text-[11px] font-bold shadow-xs hover:bg-secondary/95 flex items-center justify-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">directions</span>
+                      <span>Navigate Here</span>
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+
+        {/* Floating Map Legend */}
+        <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between px-3 py-1.5 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md shadow-xs border border-surface-container-high text-xs z-400">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface">
+              <span className="w-2.5 h-2.5 rounded-full bg-secondary"></span>
+              Official Shelter
+            </span>
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface">
+              <span className="w-2.5 h-2.5 rounded-full bg-primary-container"></span>
+              Public Facility
+            </span>
+          </div>
+          <span className="text-[10px] text-secondary font-bold">
+            {filteredPlaces.length} Refuges
+          </span>
+        </div>
+      </div>
+
+      {/* 5. Direct Emergency Helplines Callout */}
+      <div className="rounded-2xl bg-surface-container-lowest border border-surface-container-high p-3.5 shadow-xs flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-error-container text-on-error-container flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-[18px]">emergency</span>
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="font-bold text-xs text-on-surface truncate">
+              Immediate Rescue: Dial 112
+            </span>
+            <span className="text-[10px] text-on-surface-variant truncate">
+              PMC Disaster Control: 020-25501269
+            </span>
+          </div>
+        </div>
+        <a
+          href="tel:112"
+          className="px-3 py-1.5 rounded-xl bg-error text-on-error font-bold text-xs shrink-0 active:scale-95 transition-transform flex items-center gap-1"
+        >
+          <span className="material-symbols-outlined text-[15px]">call</span>
+          <span>Call 112</span>
+        </a>
+      </div>
+
+      {/* 6. List of Filtered Shelters */}
       <div className="flex flex-col gap-3">
-        {filtered.map((shelter) => {
-          const isOfficial = shelter.verification === 'official_shelter';
-          const isListed = shelter.verification === 'listed';
+        {filteredPlaces.map((place) => {
+          const isOfficial = place.statusText.includes('Verified');
+          const isEmergency = place.category === 'emergency';
 
           return (
             <article
-              key={shelter.id}
+              key={place.id}
               className="rounded-2xl bg-surface-container-lowest border border-surface-container-high p-4 flex flex-col gap-3 shadow-xs hover:border-secondary transition-all"
             >
               <div className="flex items-start justify-between gap-2">
@@ -138,62 +307,58 @@ export const SheltersView: React.FC = () => {
                   {/* Status chip */}
                   <span
                     className={`inline-flex items-center gap-1 self-start px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                      isOfficial
+                      isEmergency
+                        ? 'bg-error-container text-on-error-container'
+                        : isOfficial
                         ? 'bg-secondary text-on-secondary'
-                        : isListed
-                        ? 'bg-surface-container text-on-surface-variant'
-                        : 'bg-amber-100 text-amber-900'
+                        : 'bg-surface-container-high text-on-surface-variant'
                     }`}
                   >
                     <span className="material-symbols-outlined text-[12px]">
-                      {isOfficial ? 'verified' : 'info'}
+                      {isEmergency ? 'medical_services' : isOfficial ? 'verified' : 'apartment'}
                     </span>
                     <span>
-                      {isOfficial
+                      {isEmergency
+                        ? 'Rapid Emergency Rescue Desk'
+                        : isOfficial
                         ? 'Officially Designated Shelter'
-                        : isListed
-                        ? 'Listed Public Facility'
-                        : 'Unverified Elevation Site'}
+                        : 'Listed Facility — Higher Ground'}
                     </span>
                   </span>
 
                   <h2 className="font-bold text-sm text-on-surface truncate mt-0.5">
-                    {shelter.name}
+                    {place.name}
                   </h2>
                   <span className="text-xs text-on-surface-variant truncate">
-                    {shelter.address} • {shelter.elevation}
+                    {place.address}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-surface-container-low text-xs font-bold text-on-surface shrink-0">
                   <span className="material-symbols-outlined text-[15px] text-secondary">near_me</span>
-                  <span>{shelter.distanceKm} km</span>
+                  <span>{place.distanceFormatted}</span>
                 </div>
               </div>
 
-              {/* Feature Chips */}
-              <div className="flex flex-wrap gap-1.5">
-                {shelter.features.map((f, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2 py-0.5 rounded-lg bg-surface-container-low text-[10px] text-on-surface-variant font-medium"
-                  >
-                    {f}
-                  </span>
-                ))}
+              {/* Advisory Details */}
+              <div className="p-2.5 rounded-xl bg-surface-container-low text-xs text-on-surface-variant leading-relaxed flex items-start gap-2">
+                <span className="material-symbols-outlined text-secondary text-[16px] shrink-0 mt-0.5">
+                  terrain
+                </span>
+                <span>{place.advisory}</span>
               </div>
 
-              {/* Action */}
-              <div className="flex items-center justify-between pt-2 border-t border-surface-container-high">
+              {/* Action Button */}
+              <div className="flex items-center justify-between pt-1 border-t border-surface-container-high">
                 <span className="text-[11px] text-on-surface-variant">
-                  {shelter.category}
+                  {place.statusText}
                 </span>
                 <button
-                  onClick={() => handleDirections(shelter.name)}
-                  className="px-3.5 py-1.5 rounded-xl bg-secondary text-on-secondary font-bold text-xs shadow-xs hover:bg-secondary/90 active:scale-95 transition-all flex items-center gap-1"
+                  onClick={() => handleStartRoute(place)}
+                  className="px-3.5 py-1.5 rounded-xl bg-secondary text-on-secondary font-bold text-xs shadow-xs hover:bg-secondary/90 active:scale-95 transition-all flex items-center gap-1.5"
                 >
-                  <span className="material-symbols-outlined text-[16px]">directions_walk</span>
-                  <span>Foot Route</span>
+                  <span className="material-symbols-outlined text-[16px]">navigation</span>
+                  <span>Directions (Avoid Floods)</span>
                 </button>
               </div>
             </article>

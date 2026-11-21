@@ -23,7 +23,7 @@ export const PUNE_MAP_PLACES: MapPlace[] = [
     lng: 73.8525,
     address: 'Near Swargate / Tilak Road, Pune',
     advisory: 'Elevated community center (+18m above Mutha basin grade). Dry hall & power generator.',
-    statusText: 'Verified Safe Place',
+    statusText: 'Verified Relief Shelter',
   },
   {
     id: 'shelter-2',
@@ -33,7 +33,7 @@ export const PUNE_MAP_PLACES: MapPlace[] = [
     lng: 73.8415,
     address: 'FC Road, Deccan Gymkhana, Pune',
     advisory: 'Institutional relief point (+15m natural ridge). Sheltered seating & drinking water.',
-    statusText: 'Verified Safe Place',
+    statusText: 'Verified Relief Shelter',
   },
   {
     id: 'shelter-3',

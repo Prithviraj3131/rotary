@@ -63,6 +63,12 @@ export const App: React.FC = () => {
     PUNE_BOUNDS.center.lng,
   ]);
 
+  const [targetShelterDestination, setTargetShelterDestination] = useState<{
+    name: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
+
   // Network connectivity listener
   useEffect(() => {
     const unsub = networkState.subscribe((online) => {
@@ -330,13 +336,24 @@ export const App: React.FC = () => {
             {activeTab === 'reroute' && (
               <RerouteView
                 reports={reports}
+                userLocation={userLocation}
+                targetDestination={targetShelterDestination}
+                onClearTargetDestination={() => setTargetShelterDestination(null)}
                 onOpenMap={() => setActiveTab('map')}
               />
             )}
 
             {activeTab === 'offline' && <OfflineCommView />}
 
-            {activeTab === 'shelters' && <SheltersView />}
+            {activeTab === 'shelters' && (
+              <SheltersView
+                userLocation={userLocation}
+                onNavigateToShelter={(shelter) => {
+                  setTargetShelterDestination(shelter);
+                  setActiveTab('reroute');
+                }}
+              />
+            )}
 
             {activeTab === 'sos' && <SOSView />}
           </>
