@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header, TopMode } from './components/common/Header';
 import { BottomNav, NavTab } from './components/common/BottomNav';
 import { ForecastBanner } from './components/common/ForecastBanner';
+import { NetworkBanner } from './components/common/NetworkBanner';
 import { FloodMap } from './components/Map/FloodMap';
 import { ReportModal } from './components/Report/ReportModal';
 import { ReportConfirmationModal } from './components/Report/ReportConfirmationModal';
@@ -29,8 +30,10 @@ import { evaluateReportStatus } from './lib/trustEngine';
 import { fetchPunePrecipitation, checkForecastHotspotAlert, WeatherData } from './lib/weather';
 import { calculatePuneCellRisks } from './lib/predictionEngine';
 import { deliveryStateMachine, AlertDeliveryState } from './lib/deliveryStateMachine';
+import { networkState } from './lib/networkState';
 
 export const App: React.FC = () => {
+  const [isOnline, setIsOnline] = useState<boolean>(() => networkState.isOnline());
   const [topMode, setTopMode] = useState<TopMode>('consumer');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -59,6 +62,14 @@ export const App: React.FC = () => {
     PUNE_BOUNDS.center.lat,
     PUNE_BOUNDS.center.lng,
   ]);
+
+  // Network connectivity listener
+  useEffect(() => {
+    const unsub = networkState.subscribe((online) => {
+      setIsOnline(online);
+    });
+    return () => unsub();
+  }, []);
 
   // Acquire user GPS location
   useEffect(() => {
@@ -219,6 +230,12 @@ export const App: React.FC = () => {
       />
 
       <div className="flex-1 flex flex-col pt-16 pb-20 relative">
+        {/* Offline Mesh Network Banner */}
+        <NetworkBanner
+          isOnline={isOnline}
+          onOpenOfflineHub={() => setActiveTab('offline')}
+        />
+
         {/* Proactive Forecast Alert Banner (Shows when rainfall > 15 mm/hr) */}
         {forecastAlert && showForecastBanner && (
           <ForecastBanner
@@ -282,6 +299,7 @@ export const App: React.FC = () => {
                 setActiveTab={setActiveTab}
                 onOpenReport={() => setIsReportModalOpen(true)}
                 onOpenAlerts={() => setShowAlertsModal(true)}
+                isOnline={isOnline}
               />
             )}
 

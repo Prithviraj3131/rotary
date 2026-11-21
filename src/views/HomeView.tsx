@@ -10,6 +10,7 @@ interface HomeViewProps {
   setActiveTab: (tab: NavTab) => void;
   onOpenReport: () => void;
   onOpenAlerts?: () => void;
+  isOnline?: boolean;
 }
 
 const LOCALITIES = ['Deccan Gymkhana, Pune', 'Sinhagad Road, Pune', 'Baner, Pune', 'Kothrud, Pune'];
@@ -20,6 +21,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   setActiveTab,
   onOpenReport,
   onOpenAlerts,
+  isOnline = true,
 }) => {
   const [localityIndex, setLocalityIndex] = useState(0);
   const currentLocality = LOCALITIES[localityIndex];
@@ -48,9 +50,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-container/50 text-on-secondary-container text-xs font-semibold shrink-0">
-          <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-          <span>ONLINE</span>
+        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${
+          isOnline ? 'bg-secondary-container/50 text-on-secondary-container' : 'bg-amber-100 text-amber-900 border border-amber-300'
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-secondary animate-pulse' : 'bg-amber-600 animate-ping'}`}></span>
+          <span>{isOnline ? 'ONLINE' : 'MESH RELAY'}</span>
         </div>
       </div>
 
