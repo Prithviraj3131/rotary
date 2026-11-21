@@ -132,25 +132,91 @@ export const RelaySimView: React.FC = () => {
         </div>
 
         {/* Radio Control Bar */}
-        <div className="flex items-center justify-between gap-2 pt-1 border-t border-surface-container-high">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-surface-container-high">
           <div className="flex items-center gap-1 text-[11px] text-on-surface-variant font-mono">
-            <span>Node ID:</span>
-            <strong className="text-on-surface">{getDeviceId()}</strong>
+            <span>Node:</span>
+            <strong className="text-on-surface">{meshState.nodeName || getDeviceId()}</strong>
           </div>
 
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                nearbyMeshService.stopLiveMesh().then(() => nearbyMeshService.startLiveMesh());
+              }}
+              title="Restart discovery and reconnect to nearby phones"
+              className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all flex items-center gap-1 shadow-xs"
+            >
+              <span className="material-symbols-outlined text-[15px]">refresh</span>
+              <span>Rescan</span>
+            </button>
+
+            <button
+              onClick={handleToggleMesh}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs ${
+                meshState.isMeshActive
+                  ? 'bg-secondary text-on-secondary hover:bg-secondary/90'
+                  : 'bg-surface-container-highest text-on-surface hover:bg-surface-container-high'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {meshState.isMeshActive ? 'sensors' : 'sensors_off'}
+              </span>
+              <span>{meshState.isMeshActive ? 'Radio Armed (P2P Cluster)' : 'Turn On Radio'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Android Hardware & Permission Checklist */}
+      {meshState.isNativeSupported && !meshState.hasPermissions && (
+        <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start gap-2.5">
+            <span className="material-symbols-outlined text-amber-500 text-[22px] shrink-0 mt-0.5">security_update_warning</span>
+            <div>
+              <p className="text-xs font-bold text-on-surface">Nearby & Bluetooth Permissions Required</p>
+              <p className="text-[11px] text-on-surface-variant leading-snug">
+                Android 12/13/14 requires Bluetooth Scan and Location permissions to discover and connect with nearby phones.
+              </p>
+            </div>
+          </div>
           <button
-            onClick={handleToggleMesh}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs ${
-              meshState.isMeshActive
-                ? 'bg-secondary text-on-secondary hover:bg-secondary/90'
-                : 'bg-surface-container-highest text-on-surface hover:bg-surface-container-high'
-            }`}
+            onClick={() => nearbyMeshService.requestPermissions()}
+            className="px-3.5 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold shadow-xs hover:bg-amber-700 active:scale-95 transition-all shrink-0 flex items-center justify-center gap-1.5"
           >
-            <span className="material-symbols-outlined text-[16px]">
-              {meshState.isMeshActive ? 'sensors' : 'sensors_off'}
-            </span>
-            <span>{meshState.isMeshActive ? 'Radio Armed (P2P Cluster)' : 'Turn On Radio'}</span>
+            <span className="material-symbols-outlined text-[16px]">verified_user</span>
+            <span>Grant Permissions</span>
           </button>
+        </div>
+      )}
+
+      {/* 2-Phone Android Setup Checklist */}
+      <div className="rounded-2xl bg-surface-container-lowest border border-surface-container-high p-3 flex flex-col gap-2 shadow-sm text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[16px] text-primary">checklist</span>
+            <span className="font-bold text-[11px] text-on-surface uppercase tracking-wide">
+              Physical 2-Phone Connection Checklist
+            </span>
+          </div>
+          <span className="text-[10px] text-secondary font-mono font-semibold">Zero-Internet Direct Mesh</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+          <div className="flex items-center gap-1.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high">
+            <span className="material-symbols-outlined text-[16px] text-primary">bluetooth</span>
+            <span>1. Bluetooth <strong>ON</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high">
+            <span className="material-symbols-outlined text-[16px] text-primary">wifi</span>
+            <span>2. Wi-Fi <strong>ON</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high">
+            <span className="material-symbols-outlined text-[16px] text-primary">location_on</span>
+            <span>3. GPS/Location <strong>ON</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high">
+            <span className="material-symbols-outlined text-[16px] text-primary">social_distance</span>
+            <span>4. Distance <strong>&lt; 15m</strong></span>
+          </div>
         </div>
       </div>
 

@@ -13,7 +13,15 @@ export interface DiscoveredPeer {
 }
 
 export interface NearbyConnectionsPluginInterface {
-  isNearbySupported(): Promise<{ supported: boolean; platform: string; strategy: string; serviceId: string }>;
+  isNearbySupported(): Promise<{
+    supported: boolean;
+    platform: string;
+    strategy: string;
+    serviceId: string;
+    endpointName?: string;
+    hasPermissions?: boolean;
+  }>;
+  requestNearbyPermissions(): Promise<{ granted: boolean }>;
   startMesh(options?: { endpointName?: string }): Promise<{
     success: boolean;
     isAdvertising: boolean;
@@ -42,6 +50,7 @@ export const NativeNearby = registerPlugin<NearbyConnectionsPluginInterface>('Ne
 
 export interface MeshSystemState {
   isNativeSupported: boolean;
+  hasPermissions: boolean;
   isMeshActive: boolean;
   isAdvertising: boolean;
   isDiscovering: boolean;
@@ -62,6 +71,7 @@ class NearbyMeshService {
 
   private state: MeshSystemState = {
     isNativeSupported: false,
+    hasPermissions: false,
     isMeshActive: false,
     isAdvertising: false,
     isDiscovering: false,
@@ -106,6 +116,12 @@ class NearbyMeshService {
         const res = await NativeNearby.isNearbySupported();
         this.state.isNativeSupported = Boolean(res?.supported);
         if (this.state.isNativeSupported) {
+          if (res.hasPermissions !== undefined) {
+            this.state.hasPermissions = res.hasPermissions;
+          }
+          if (res.endpointName) {
+            this.state.nodeName = res.endpointName;
+          }
           this.addLog(`Google Nearby Connections API available (Strategy: ${res.strategy})`);
           this.setupNativeListeners();
         }
@@ -115,6 +131,29 @@ class NearbyMeshService {
     }
     this.notify();
     return this.state.isNativeSupported;
+  }
+
+  public async requestPermissions(): Promise<boolean> {
+    if (this.state.isNativeSupported) {
+      try {
+        const res = await NativeNearby.requestNearbyPermissions();
+        this.state.hasPermissions = Boolean(res?.granted);
+        this.addLog(
+          this.state.hasPermissions
+            ? '✓ Bluetooth & Nearby permissions granted by Android OS'
+            : '⚠ Nearby permissions denied. Bluetooth/Location permissions are required for discovery.'
+        );
+        this.notify();
+        if (this.state.hasPermissions && this.state.isMeshActive) {
+          await this.startLiveMesh();
+        }
+        return this.state.hasPermissions;
+      } catch (err: any) {
+        this.addLog(`Permission request error: ${err?.message || err}`);
+        return false;
+      }
+    }
+    return true;
   }
 
   private setupNativeListeners() {
@@ -183,6 +222,16 @@ class NearbyMeshService {
 
   // Starts active Google Nearby Advertising & Discovery (or Live LAN mesh on Web)
   public async startLiveMesh(): Promise<void> {
+    // Ensure we have the required runtime permissions before attempting to start the native mesh.
+    if (this.state.isNativeSupported && !this.state.hasPermissions) {
+      const granted = await this.requestPermissions();
+      if (!granted) {
+        this.addLog('⚠ Cannot start mesh – required permissions denied');
+        this.notify();
+        return;
+      }
+    }
+
     this.state.isMeshActive = true;
     this.state.nodeName = getDeviceName();
 
@@ -191,7 +240,10 @@ class NearbyMeshService {
         const res = await NativeNearby.startMesh({ endpointName: this.state.nodeName });
         this.state.isAdvertising = res.isAdvertising;
         this.state.isDiscovering = res.isDiscovering;
-        this.addLog(`Active Radio: BLE advertising & Wi-Fi Direct discovery active`);
+        if (res.endpointName) {
+          this.state.nodeName = res.endpointName;
+        }
+        this.addLog(`Active Radio: BLE advertising & Wi-Fi Direct discovery active (${this.state.nodeName})`);
       } catch (err: any) {
         this.addLog(`Native radio init note: ${err?.message || err}. Bridging via LAN Relay.`);
       }

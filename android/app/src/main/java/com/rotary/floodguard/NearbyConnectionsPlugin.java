@@ -1,15 +1,19 @@
 package com.rotary.floodguard;
 
+import android.Manifest;
 import android.content.Context;
 import android.os.Build;
 import androidx.annotation.NonNull;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import com.google.android.gms.nearby.Nearby;
 import com.google.android.gms.nearby.connection.AdvertisingOptions;
@@ -32,7 +36,32 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@CapacitorPlugin(name = "NearbyConnections")
+@CapacitorPlugin(
+    name = "NearbyConnections",
+    permissions = {
+        @Permission(
+            alias = "location",
+            strings = {
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            }
+        ),
+        @Permission(
+            alias = "bluetooth",
+            strings = {
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_CONNECT
+            }
+        ),
+        @Permission(
+            alias = "nearbyWifi",
+            strings = {
+                "android.permission.NEARBY_WIFI_DEVICES"
+            }
+        )
+    }
+)
 public class NearbyConnectionsPlugin extends Plugin {
 
     private static final String SERVICE_ID = "com.rotary.floodguard.mesh";
@@ -43,12 +72,15 @@ public class NearbyConnectionsPlugin extends Plugin {
     private final Map<String, String> discoveredEndpoints = new HashMap<>();
     private boolean isAdvertising = false;
     private boolean isDiscovering = false;
-    private String localEndpointName = "FloodGuard-Node-" + Build.MODEL;
+    private String localEndpointName;
 
     @Override
     public void load() {
         super.load();
         connectionsClient = Nearby.getConnectionsClient(getContext());
+        // Guaranteed unique node name across duplicate phone models
+        String cleanModel = Build.MODEL != null ? Build.MODEL.replaceAll("[^a-zA-Z0-9]", "") : "Phone";
+        localEndpointName = "Node-" + cleanModel + "-" + ((int)(Math.random() * 9000) + 1000);
     }
 
     @PluginMethod
@@ -58,7 +90,42 @@ public class NearbyConnectionsPlugin extends Plugin {
         ret.put("platform", "android");
         ret.put("strategy", "P2P_CLUSTER");
         ret.put("serviceId", SERVICE_ID);
+        ret.put("endpointName", localEndpointName);
+        ret.put("hasPermissions", checkPermissionsInternal());
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestNearbyPermissions(PluginCall call) {
+        if (!checkPermissionsInternal()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissionForAliases(new String[]{"bluetooth", "location", "nearbyWifi"}, call, "permissionsCallback");
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                requestPermissionForAliases(new String[]{"bluetooth", "location"}, call, "permissionsCallback");
+            } else {
+                requestPermissionForAlias("location", call, "permissionsCallback");
+            }
+        } else {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+        }
+    }
+
+    @PermissionCallback
+    private void permissionsCallback(PluginCall call) {
+        boolean granted = checkPermissionsInternal();
+        notifyStatusChange(granted ? "permissions_granted" : "permissions_denied");
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        call.resolve(ret);
+    }
+
+    private boolean checkPermissionsInternal() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return getPermissionState("bluetooth") == PermissionState.GRANTED;
+        }
+        return getPermissionState("location") == PermissionState.GRANTED;
     }
 
     @PluginMethod
@@ -68,6 +135,27 @@ public class NearbyConnectionsPlugin extends Plugin {
             localEndpointName = name.trim();
         }
 
+        // Check if permissions need requesting
+        if (!checkPermissionsInternal()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissionForAliases(new String[]{"bluetooth", "location", "nearbyWifi"}, call, "startMeshAfterPerms");
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                requestPermissionForAliases(new String[]{"bluetooth", "location"}, call, "startMeshAfterPerms");
+            } else {
+                requestPermissionForAlias("location", call, "startMeshAfterPerms");
+            }
+            return;
+        }
+
+        startAdvertisingAndDiscovery(call);
+    }
+
+    @PermissionCallback
+    private void startMeshAfterPerms(PluginCall call) {
+        startAdvertisingAndDiscovery(call);
+    }
+
+    private void startAdvertisingAndDiscovery(PluginCall call) {
         startAdvertisingInternal();
         startDiscoveryInternal();
 
@@ -98,7 +186,7 @@ public class NearbyConnectionsPlugin extends Plugin {
         if (connectedEndpoints.isEmpty()) {
             JSObject ret = new JSObject();
             ret.put("success", false);
-            ret.put("message", "No connected peers to receive payload directly");
+            ret.put("message", "No connected peers in cluster to receive payload");
             ret.put("recipientCount", 0);
             call.resolve(ret);
             return;
@@ -144,42 +232,54 @@ public class NearbyConnectionsPlugin extends Plugin {
         ret.put("totalConnected", connectedEndpoints.size());
         ret.put("isAdvertising", isAdvertising);
         ret.put("isDiscovering", isDiscovering);
+        ret.put("endpointName", localEndpointName);
+        ret.put("hasPermissions", checkPermissionsInternal());
         call.resolve(ret);
     }
 
     private void startAdvertisingInternal() {
-        AdvertisingOptions options = new AdvertisingOptions.Builder().setStrategy(STRATEGY).build();
-
-        connectionsClient.startAdvertising(localEndpointName, SERVICE_ID, connectionLifecycleCallback, options)
-            .addOnSuccessListener(aVoid -> {
-                isAdvertising = true;
-                notifyStatusChange("advertising_started");
-            })
-            .addOnFailureListener(e -> {
-                isAdvertising = false;
-                notifyStatusChange("advertising_failed: " + e.getMessage());
-            });
+        try {
+            AdvertisingOptions options = new AdvertisingOptions.Builder().setStrategy(STRATEGY).build();
+            connectionsClient.startAdvertising(localEndpointName, SERVICE_ID, connectionLifecycleCallback, options)
+                .addOnSuccessListener(aVoid -> {
+                    isAdvertising = true;
+                    notifyStatusChange("advertising_started: " + localEndpointName);
+                })
+                .addOnFailureListener(e -> {
+                    isAdvertising = false;
+                    notifyStatusChange("advertising_failed: " + e.getMessage());
+                });
+        } catch (SecurityException se) {
+            isAdvertising = false;
+            notifyStatusChange("advertising_security_error: " + se.getMessage());
+        }
     }
 
     private void startDiscoveryInternal() {
-        DiscoveryOptions options = new DiscoveryOptions.Builder().setStrategy(STRATEGY).build();
-
-        connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-            .addOnSuccessListener(aVoid -> {
-                isDiscovering = true;
-                notifyStatusChange("discovery_started");
-            })
-            .addOnFailureListener(e -> {
-                isDiscovering = false;
-                notifyStatusChange("discovery_failed: " + e.getMessage());
-            });
+        try {
+            DiscoveryOptions options = new DiscoveryOptions.Builder().setStrategy(STRATEGY).build();
+            connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
+                .addOnSuccessListener(aVoid -> {
+                    isDiscovering = true;
+                    notifyStatusChange("discovery_scanning_for_peers");
+                })
+                .addOnFailureListener(e -> {
+                    isDiscovering = false;
+                    notifyStatusChange("discovery_failed: " + e.getMessage());
+                });
+        } catch (SecurityException se) {
+            isDiscovering = false;
+            notifyStatusChange("discovery_security_error: " + se.getMessage());
+        }
     }
 
     private void stopMeshInternal() {
         if (connectionsClient != null) {
-            connectionsClient.stopAdvertising();
-            connectionsClient.stopDiscovery();
-            connectionsClient.stopAllEndpoints();
+            try {
+                connectionsClient.stopAdvertising();
+                connectionsClient.stopDiscovery();
+                connectionsClient.stopAllEndpoints();
+            } catch (Exception ignored) {}
         }
         isAdvertising = false;
         isDiscovering = false;
@@ -199,9 +299,15 @@ public class NearbyConnectionsPlugin extends Plugin {
             data.put("name", info.getEndpointName());
             notifyListeners("onEndpointFound", data);
 
-            // Auto-connect to form seamless zero-click ad-hoc mesh network
-            connectionsClient.requestConnection(localEndpointName, endpointId, connectionLifecycleCallback)
-                .addOnFailureListener(e -> notifyStatusChange("connect_request_failed: " + e.getMessage()));
+            // Tie-breaking check: Only the node with higher name initiates requestConnection
+            // This prevents mutual simultaneous collision that drops connections on Android
+            if (localEndpointName.compareTo(info.getEndpointName()) > 0) {
+                notifyStatusChange("initiating_connection_to: " + info.getEndpointName());
+                connectionsClient.requestConnection(localEndpointName, endpointId, connectionLifecycleCallback)
+                    .addOnFailureListener(e -> notifyStatusChange("connect_request_failed: " + e.getMessage()));
+            } else {
+                notifyStatusChange("awaiting_connection_from: " + info.getEndpointName());
+            }
         }
 
         @Override
@@ -221,7 +327,7 @@ public class NearbyConnectionsPlugin extends Plugin {
         public void onConnectionInitiated(@NonNull String endpointId, @NonNull ConnectionInfo info) {
             discoveredEndpoints.put(endpointId, info.getEndpointName());
 
-            // Auto-accept connection for zero-friction disaster mesh relay
+            // Auto-accept connection for zero-click disaster mesh relay
             connectionsClient.acceptConnection(endpointId, payloadCallback);
 
             JSObject data = new JSObject();
@@ -229,6 +335,7 @@ public class NearbyConnectionsPlugin extends Plugin {
             data.put("name", info.getEndpointName());
             data.put("authCode", info.getAuthenticationDigits());
             notifyListeners("onConnectionInitiated", data);
+            notifyStatusChange("auto_accepted_connection: " + info.getEndpointName());
         }
 
         @Override
@@ -237,6 +344,9 @@ public class NearbyConnectionsPlugin extends Plugin {
             if (success) {
                 String name = discoveredEndpoints.getOrDefault(endpointId, "Nearby Peer");
                 connectedEndpoints.put(endpointId, name);
+                notifyStatusChange("peer_connected_success: " + name);
+            } else {
+                notifyStatusChange("connection_rejected_or_failed_code: " + resolution.getStatus().getStatusCode());
             }
 
             JSObject data = new JSObject();
@@ -248,12 +358,13 @@ public class NearbyConnectionsPlugin extends Plugin {
 
         @Override
         public void onDisconnected(@NonNull String endpointId) {
-            connectedEndpoints.remove(endpointId);
+            String name = connectedEndpoints.remove(endpointId);
             discoveredEndpoints.remove(endpointId);
 
             JSObject data = new JSObject();
             data.put("endpointId", endpointId);
             notifyListeners("onDisconnected", data);
+            notifyStatusChange("peer_disconnected: " + (name != null ? name : endpointId));
         }
     };
 
@@ -274,7 +385,7 @@ public class NearbyConnectionsPlugin extends Plugin {
 
         @Override
         public void onPayloadTransferUpdate(@NonNull String endpointId, @NonNull PayloadTransferUpdate update) {
-            // Optional progress tracking
+            // Transfer status update
         }
     };
 
