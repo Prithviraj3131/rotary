@@ -1,80 +1,26 @@
-# How to Build and Download the FloodGuard AI Android APK
+# Download FloodGuard AI Android APK
 
-FloodGuard AI is packaged as a native Android project using **Capacitor 8**. The native project structure has been generated, configured with necessary location and network permissions, and synced with production web assets in the `android/` directory.
+### 🚀 Direct Download Link (v1.0.0)
+Click below to download the compiled Android APK directly to your phone or computer:
+- **Direct APK Download**: [https://github.com/Prithviraj3131/rotary/releases/download/v1.0.0/FloodGuard-AI.apk](https://github.com/Prithviraj3131/rotary/releases/download/v1.0.0/FloodGuard-AI.apk)
+- **GitHub Release Page**: [https://github.com/Prithviraj3131/rotary/releases/tag/v1.0.0](https://github.com/Prithviraj3131/rotary/releases/tag/v1.0.0)
+- **CI Build Run & Artifact**: [https://github.com/Prithviraj3131/rotary/actions/runs/44904485871](https://github.com/Prithviraj3131/rotary/actions/runs/44904485871)
 
----
-
-## Method 1: Build Using Android Studio (Recommended Local GUI)
-
-If you have [Android Studio](https://developer.android.com/studio) installed:
-
-1. **Open the Android project**:
-   ```bash
-   npx cap open android
-   # or
-   npm run cap:open
-   ```
-   *(Alternatively, launch Android Studio, click **Open**, and select the `d:\hackathon\rotary\android` folder).*
-
-2. **Wait for Gradle Sync**:
-   Android Studio will index dependencies and sync Gradle automatically using its internal OpenJDK.
-
-3. **Build the APK**:
-   - In the top menu, go to **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)**.
-   - When finished, a notification popup will say *"Build APK(s): APK(s) generated successfully"*. Click **locate**.
-
-4. **APK Location**:
-   Your APK will be ready at:
-   ```text
-   android/app/build/outputs/apk/debug/app-debug.apk
-   ```
-   You can copy this `.apk` directly to your phone via USB or install it on an Android Emulator.
+File Size: ~4.18 MB  
+Package Name: `com.rotary.floodguard`
 
 ---
 
-## Method 2: Build in the Cloud via GitHub Actions (Zero Local Tooling)
-
-If you don't want to install Android Studio or the ~2GB Android SDK locally:
-
-1. **Push this repository to GitHub**:
-   ```bash
-   git add .
-   git commit -m "feat(android): add capacitor native project and build workflow"
-   git push origin main
-   ```
-
-2. **Automatic Cloud Build**:
-   - Go to your repository on GitHub.
-   - Click the **Actions** tab.
-   - The **Build Android APK** workflow will run automatically.
-   - Once completed (~2-3 minutes), click on the workflow run.
-   - Under **Artifacts** at the bottom, click **`FloodGuard-AI-debug-apk`** to download your APK as a zip file.
+## Installation on Android
+1. Download the `.apk` using the link above onto your Android phone.
+2. Open the file from your **Downloads** notification or file manager.
+3. If prompted with *"For your security, your phone is not allowed to install unknown apps from this source"*, tap **Settings** and toggle **Allow from this source**.
+4. Tap **Install**.
+5. Grant Location permission when prompted for turn-by-turn navigation and shelter routing.
 
 ---
 
-## Method 3: Command Line Build (Requires JDK 17 & Android SDK)
-
-If you have OpenJDK 17 and Android SDK command-line tools installed:
-
-1. Ensure `JAVA_HOME` and `ANDROID_HOME` are set in your environment.
-2. Run:
-   ```bash
-   npm run cap:sync
-   cd android
-   ./gradlew.bat assembleDebug
-   ```
-3. Locate the generated APK at:
-   ```text
-   android/app/build/outputs/apk/debug/app-debug.apk
-   ```
-
----
-
-## Android Permissions Configured
-The app is configured in [AndroidManifest.xml](file:///d:/hackathon/rotary/android/app/src/main/AndroidManifest.xml) with:
-- `android.permission.INTERNET` (API requests & map tiles)
-- `android.permission.ACCESS_FINE_LOCATION` (GPS live navigation)
-- `android.permission.ACCESS_COARSE_LOCATION` (Network location fallback)
-- `android.hardware.location.gps` (Hardware GPS feature requirement)
-- `android.permission.ACCESS_NETWORK_STATE` (Offline mesh detection)
-- `android.permission.VIBRATE` (Turn-by-turn navigation alerts)
+## Alternative: Instant 1-Tap Install via PWA
+You can also run FloodGuard AI immediately as a progressive web app:
+- Open `http://192.168.1.2:3000/` in Chrome on your phone.
+- Tap **Install App** or the Chrome menu (3 dots) $\rightarrow$ **Add to Home screen**.
