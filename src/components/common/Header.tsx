@@ -38,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
               <DemoBadge />
             </div>
             <span className="font-semibold text-[11px] sm:text-xs text-on-surface truncate">
-              {topMode === 'consumer' ? locality : topMode === 'authority' ? 'Authority Console' : 'Mesh Relay Sim'}
+              {topMode === 'consumer' ? locality : topMode === 'authority' ? 'Authority Console' : 'Nearby Mesh Hub'}
             </span>
           </div>
         </div>
