@@ -1,38 +1,70 @@
 import { AlertPacket, OfflineQueuedMessage } from '../types/relay';
+import { saveOfflineMessageIDB, getOfflineMessagesIDB } from './idb';
 
 // Local seen-set of alert IDs with expiry timestamps to drop duplicates (Rule 3)
 const seenAlerts = new Map<string, number>();
 
-// In-memory queue of user-composed offline messages
-const queuedMessages: OfflineQueuedMessage[] = [
-  {
-    id: 'msg-local-01',
-    type: 'Status Update',
-    tag: 'Family',
-    text: 'Safe on 2nd floor at Baner home. Power cut active. Water rising in street parking.',
-    priority: 'normal',
-    expiryHours: 6,
-    created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-    status: 'relayed_mesh',
-    hopsTraveled: 3,
-    peerRelayCount: 4
-  },
-  {
-    id: 'msg-local-02',
-    type: 'Emergency Help',
-    tag: 'Relief Team',
-    text: 'Need drinking water packet and dry battery for elderly resident near Datta Mandir.',
-    priority: 'high',
-    expiryHours: 2,
-    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    status: 'queued_local',
-    hopsTraveled: 0,
-    peerRelayCount: 1
-  }
-];
-
 type MessageListener = (messages: OfflineQueuedMessage[]) => void;
 const listeners = new Set<MessageListener>();
+
+let localMessagesCache: OfflineQueuedMessage[] = [];
+
+// Initialize messages from IndexedDB or seed defaults if empty
+export async function initOfflineMessages(): Promise<OfflineQueuedMessage[]> {
+  try {
+    const fromDb = await getOfflineMessagesIDB();
+    if (fromDb && fromDb.length > 0) {
+      localMessagesCache = fromDb;
+    } else {
+      localMessagesCache = [
+        {
+          id: 'msg-local-01',
+          type: 'Status Update',
+          tag: 'Family',
+          text: 'Safe on 2nd floor at Baner home. Power cut active. Water rising in street parking.',
+          priority: 'normal',
+          expiryHours: 6,
+          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+          status: 'relayed_mesh',
+          hopsTraveled: 3,
+          peerRelayCount: 4,
+        },
+        {
+          id: 'msg-local-02',
+          type: 'Emergency Help',
+          tag: 'Relief Team',
+          text: 'Need drinking water packet and dry battery for elderly resident near Datta Mandir.',
+          priority: 'high',
+          expiryHours: 2,
+          created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          status: 'queued_local',
+          hopsTraveled: 0,
+          peerRelayCount: 1,
+        },
+      ];
+      for (const m of localMessagesCache) {
+        await saveOfflineMessageIDB(m);
+      }
+    }
+  } catch (err) {
+    console.warn('IDB offline messages fetch warning, using in-memory store:', err);
+  }
+  notify();
+  return localMessagesCache;
+}
+
+function notify() {
+  listeners.forEach((cb) => cb([...localMessagesCache]));
+}
+
+export function subscribeQueuedMessages(listener: MessageListener): () => void {
+  listeners.add(listener);
+  // Send current cache immediately
+  listener([...localMessagesCache]);
+  // Fetch latest from IndexedDB
+  initOfflineMessages();
+  return () => listeners.delete(listener);
+}
 
 /**
  * Validates incoming alert packet against the 9 Ground Rules (Section 5)
@@ -77,15 +109,15 @@ export function verifyAndProcessPacket(packet: AlertPacket): {
 }
 
 /**
- * Adds an offline message composed by the user to the local device queue
+ * Adds an offline message composed by the user to the local IndexedDB device queue
  */
-export function queueOfflineMessage(
+export async function queueOfflineMessage(
   type: 'Emergency Help' | 'Flood Report' | 'Status Update',
   tag: string,
   text: string,
   priority: 'high' | 'normal',
   expiryHours: number
-): OfflineQueuedMessage {
+): Promise<OfflineQueuedMessage> {
   const msg: OfflineQueuedMessage = {
     id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     type,
@@ -96,34 +128,87 @@ export function queueOfflineMessage(
     created_at: new Date().toISOString(),
     status: 'queued_local',
     hopsTraveled: 0,
-    peerRelayCount: 0
+    peerRelayCount: 0,
   };
 
-  queuedMessages.unshift(msg);
+  localMessagesCache.unshift(msg);
   notify();
 
-  // Simulate nearby peer relay pickup after 4 seconds for demonstration
-  setTimeout(() => {
-    msg.status = 'relayed_mesh';
-    msg.hopsTraveled = 1;
-    msg.peerRelayCount = 2;
-    notify();
-  }, 4000);
+  try {
+    await saveOfflineMessageIDB(msg);
+  } catch (err) {
+    console.warn('Could not persist offline message to IDB:', err);
+  }
 
   return msg;
 }
 
-export function getQueuedMessages(): OfflineQueuedMessage[] {
-  return [...queuedMessages];
-}
+/**
+ * Simulates a peer passing by within BLE range, exchanging packets,
+ * incrementing hops, and validating Ed25519 signatures
+ */
+export async function simulatePeerMeshExchange(): Promise<{
+  relayedCount: number;
+  newIncomingMessage?: OfflineQueuedMessage;
+}> {
+  let relayedCount = 0;
 
-export function subscribeQueuedMessages(listener: MessageListener): () => void {
-  listeners.add(listener);
-  listener(getQueuedMessages());
-  return () => listeners.delete(listener);
-}
+  // 1. Advance queued messages to relayed
+  const updated = localMessagesCache.map((m) => {
+    if (m.status === 'queued_local') {
+      relayedCount++;
+      return {
+        ...m,
+        status: 'relayed_mesh' as const,
+        hopsTraveled: m.hopsTraveled + 1,
+        peerRelayCount: m.peerRelayCount + 1,
+      };
+    }
+    return m;
+  });
 
-function notify(): void {
-  const data = getQueuedMessages();
-  listeners.forEach(cb => cb(data));
+  // 2. Introduce an incoming mesh packet from nearby peer
+  const incomingMessagesPool: { text: string; tag: string; type: 'Emergency Help' | 'Status Update' }[] = [
+    {
+      text: 'Water at Alka Talkies underpass is now 50cm deep. Avoid crossing via Tilak Road bridge instead.',
+      tag: 'Neighbors',
+      type: 'Status Update',
+    },
+    {
+      text: 'Evacuation boat active near Sinhagad Road Vitthalwadi. Assemble near Parvati hilltop.',
+      tag: 'Relief Team',
+      type: 'Emergency Help',
+    },
+    {
+      text: 'Power cut extended to Kothrud sector 4. Mobile signals weak. Using BLE mesh relay.',
+      tag: 'Family',
+      type: 'Status Update',
+    },
+  ];
+
+  const randomIncoming = incomingMessagesPool[Math.floor(Math.random() * incomingMessagesPool.length)];
+  const incomingMsg: OfflineQueuedMessage = {
+    id: `peer-${Date.now()}`,
+    type: randomIncoming.type,
+    tag: randomIncoming.tag,
+    text: randomIncoming.text,
+    priority: 'normal',
+    expiryHours: 4,
+    created_at: new Date().toISOString(),
+    status: 'relayed_mesh',
+    hopsTraveled: 2,
+    peerRelayCount: 3,
+  };
+
+  updated.unshift(incomingMsg);
+  localMessagesCache = updated;
+  notify();
+
+  for (const m of updated) {
+    try {
+      await saveOfflineMessageIDB(m);
+    } catch {}
+  }
+
+  return { relayedCount, newIncomingMessage: incomingMsg };
 }

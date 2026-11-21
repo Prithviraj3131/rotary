@@ -1,6 +1,7 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { PendingReport } from '../types/reports';
 import { ReportRow, CellRiskRow } from '../types/database';
+import { OfflineQueuedMessage } from '../types/relay';
 
 interface FloodGuardDB extends DBSchema {
   pendingReports: {
@@ -25,10 +26,14 @@ interface FloodGuardDB extends DBSchema {
     key: string;
     value: CellRiskRow;
   };
+  offlineMessages: {
+    key: string; // id
+    value: OfflineQueuedMessage;
+  };
 }
 
 const DB_NAME = 'floodguard_pune_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<FloodGuardDB>> | null = null;
 
@@ -48,6 +53,9 @@ export function getIDB(): Promise<IDBPDatabase<FloodGuardDB>> {
         }
         if (!db.objectStoreNames.contains('cachedCellRisk')) {
           db.createObjectStore('cachedCellRisk', { keyPath: 'cell_id' });
+        }
+        if (!db.objectStoreNames.contains('offlineMessages')) {
+          db.createObjectStore('offlineMessages', { keyPath: 'id' });
         }
       },
     });
@@ -83,4 +91,20 @@ export async function cacheReportsLocally(reports: ReportRow[]): Promise<void> {
 export async function getLocalCachedReports(): Promise<ReportRow[]> {
   const db = await getIDB();
   return db.getAll('cachedReports');
+}
+
+// Offline Mesh Messages in IndexedDB
+export async function saveOfflineMessageIDB(msg: OfflineQueuedMessage): Promise<void> {
+  const db = await getIDB();
+  await db.put('offlineMessages', msg);
+}
+
+export async function getOfflineMessagesIDB(): Promise<OfflineQueuedMessage[]> {
+  const db = await getIDB();
+  return db.getAll('offlineMessages');
+}
+
+export async function deleteOfflineMessageIDB(id: string): Promise<void> {
+  const db = await getIDB();
+  await db.delete('offlineMessages', id);
 }

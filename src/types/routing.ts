@@ -15,6 +15,15 @@ export interface RouteHazardBlock {
   message: string;
 }
 
+export interface RouteStep {
+  instruction: string;
+  roadName: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  type: string;
+  modifier?: string;
+}
+
 export interface RouteOption {
   id: string;
   name: string;
@@ -28,6 +37,7 @@ export interface RouteOption {
   elevationGainM?: number;
   riskDescription: string;
   avoidanceVerified: boolean;
+  steps?: RouteStep[];
 }
 
 export interface RerouteResult {
