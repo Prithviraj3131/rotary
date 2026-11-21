@@ -1,0 +1,8 @@
+{
+  "appId": "com.rotary.floodguard",
+  "appName": "FloodGuard AI",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

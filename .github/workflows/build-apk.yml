@@ -31,14 +31,16 @@ jobs:
       - name: Install NPM Dependencies
         run: npm ci
 
-      - name: Make Gradle Wrapper Executable
-        run: chmod +x android/gradlew
-
       - name: Build Web Application
         run: npm run build
 
-      - name: Sync Capacitor Android
-        run: npx cap sync android
+      - name: Copy Assets to Android
+        run: npx cap copy android
+
+      - name: Configure Android SDK & Gradle
+        run: |
+          chmod +x android/gradlew
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
       - name: Build Debug APK with Gradle
         run: |
