@@ -219,6 +219,56 @@ export const RerouteView: React.FC<RerouteViewProps> = ({ reports, onOpenMap }) 
               <span className="material-symbols-outlined text-[13px] text-secondary">info</span>
               <span>{rerouteResult.disclaimer}</span>
             </div>
+
+            {/* Turn-by-Turn Avoidance Directions (Matching Route Details Template) */}
+            <div className="mt-2 pt-2 border-t border-surface-container flex flex-col gap-2">
+              <div className="flex items-center justify-between text-xs font-bold text-on-surface">
+                <span>Turn-by-Turn Hazard Avoidance</span>
+                <span className="text-[10px] text-secondary font-semibold">4 Guidance Steps</span>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-start gap-2.5 p-2 rounded-xl bg-surface-container-low text-xs">
+                  <div className="w-6 h-6 rounded-lg bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="material-symbols-outlined text-[14px]">straight</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-semibold text-on-surface">Head towards higher ridge corridor</span>
+                    <span className="text-[10px] text-on-surface-variant">1.2 km • Elevation +8m gain</span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2 rounded-xl bg-secondary-container/30 text-xs border border-secondary/20">
+                  <div className="w-6 h-6 rounded-lg bg-secondary text-on-secondary flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="material-symbols-outlined text-[14px]">turn_slight_right</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-semibold text-secondary">Bypass low underpass (+50m buffer)</span>
+                    <span className="text-[10px] text-on-secondary-container">850 m • Diverts safely around flooded basin</span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2 rounded-xl bg-surface-container-low text-xs">
+                  <div className="w-6 h-6 rounded-lg bg-surface-container-high text-on-surface flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="material-symbols-outlined text-[14px]">turn_left</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-semibold text-on-surface">Merge onto arterial flyover</span>
+                    <span className="text-[10px] text-on-surface-variant">2.1 km • Reported clear by crowdsourced telemetry</span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2 rounded-xl bg-surface-container-low text-xs">
+                  <div className="w-6 h-6 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="material-symbols-outlined text-[14px]">flag</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-semibold text-on-surface">Arrive at {activePreset.destination.name}</span>
+                    <span className="text-[10px] text-on-surface-variant">Destination safely reached</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

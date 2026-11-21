@@ -9,6 +9,7 @@ interface HeaderProps {
   locality?: string;
   onOpenAlerts?: () => void;
   onOpenProfile?: () => void;
+  onOpenHelp?: () => void;
   activeAlertCount?: number;
 }
 
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   locality = 'Pune Operations',
   onOpenAlerts,
   onOpenProfile,
+  onOpenHelp,
   activeAlertCount = 0,
 }) => {
   return (
@@ -41,9 +43,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right Controls: Alerts Bell + Profile + Mode Switcher */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Consumer Mode Shortcuts: Alert Bell & Profile */}
+        {/* Right Controls: Alerts Bell + Profile + Help + Mode Switcher */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Consumer Mode Shortcuts */}
           {topMode === 'consumer' && (
             <>
               {onOpenAlerts && (
@@ -59,6 +61,17 @@ export const Header: React.FC<HeaderProps> = ({
                       {activeAlertCount}
                     </span>
                   )}
+                </button>
+              )}
+
+              {onOpenHelp && (
+                <button
+                  onClick={onOpenHelp}
+                  className="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center justify-center transition-colors"
+                  title="Emergency Helplines & Support"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[18px]">help_outline</span>
                 </button>
               )}
 

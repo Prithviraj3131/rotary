@@ -4,10 +4,13 @@ import { BottomNav, NavTab } from './components/common/BottomNav';
 import { ForecastBanner } from './components/common/ForecastBanner';
 import { FloodMap } from './components/Map/FloodMap';
 import { ReportModal } from './components/Report/ReportModal';
+import { ReportConfirmationModal } from './components/Report/ReportConfirmationModal';
 import { UrgentAlertModal } from './components/Alerts/UrgentAlertModal';
 import { DeliveryTrackerModal } from './components/Alerts/DeliveryTrackerModal';
 import { AlertsCentreModal } from './components/Alerts/AlertsCentreModal';
 import { MyReportsModal } from './components/Profile/MyReportsModal';
+import { OnboardingModal } from './components/common/OnboardingModal';
+import { HelpSupportModal } from './components/common/HelpSupportModal';
 import { HeavyRainSimulator } from './components/Demo/HeavyRainSimulator';
 import { HotspotAnalyticsModal } from './components/Analytics/HotspotAnalyticsModal';
 import { SavedRoutesModal } from './components/Routing/SavedRoutesModal';
@@ -33,6 +36,16 @@ export const App: React.FC = () => {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
+    return localStorage.getItem('floodguard_onboarded') !== 'true';
+  });
+  const [confirmationReport, setConfirmationReport] = useState<{
+    id: string;
+    depth: string;
+    landmark: string;
+  } | null>(null);
+
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showSavedRoutesModal, setShowSavedRoutesModal] = useState(false);
   const [reports, setReports] = useState<ReportRow[]>([]);
@@ -194,13 +207,14 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface text-on-surface font-sans selection:bg-secondary/20">
-      {/* Top Header with Console Switcher, Alert Bell & Profile */}
+      {/* Top Header with Console Switcher, Alert Bell, Help & Profile */}
       <Header
         topMode={topMode}
         setTopMode={setTopMode}
         locality="Pune Operations"
         onOpenAlerts={() => setShowAlertsModal(true)}
         onOpenProfile={() => setShowProfileModal(true)}
+        onOpenHelp={() => setShowHelpModal(true)}
         activeAlertCount={criticalAlertsCount}
       />
 
@@ -314,6 +328,34 @@ export const App: React.FC = () => {
       <ReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
+        onReportCreated={(report) => setConfirmationReport(report)}
+      />
+
+      {/* Report Confirmation Modal */}
+      {confirmationReport && (
+        <ReportConfirmationModal
+          isOpen={Boolean(confirmationReport)}
+          onClose={() => setConfirmationReport(null)}
+          reportId={confirmationReport.id}
+          depth={confirmationReport.depth}
+          locationName={confirmationReport.landmark}
+          onViewOnMap={() => {
+            setConfirmationReport(null);
+            setActiveTab('map');
+          }}
+        />
+      )}
+
+      {/* First-time Onboarding Modal */}
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+      />
+
+      {/* Emergency Help & Helplines Modal */}
+      <HelpSupportModal
+        isOpen={showHelpModal}
+        onClose={() => setShowHelpModal(false)}
       />
 
       {/* Pune Alerts Centre Modal */}
@@ -337,6 +379,14 @@ export const App: React.FC = () => {
         onClose={() => setShowProfileModal(false)}
         reports={reports}
         onOpenReportModal={() => setIsReportModalOpen(true)}
+        onOpenHelpSupport={() => {
+          setShowProfileModal(false);
+          setShowHelpModal(true);
+        }}
+        onOpenOnboarding={() => {
+          setShowProfileModal(false);
+          setShowOnboarding(true);
+        }}
       />
 
       {/* Urgent Alert Modal (Siren & Vibration) */}

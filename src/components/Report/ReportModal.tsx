@@ -9,7 +9,7 @@ import { analyzeFloodPhoto, ImageAnalysisResult } from '../../lib/imageCheck';
 interface ReportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onReportCreated?: () => void;
+  onReportCreated?: (report: { id: string; depth: string; landmark: string }) => void;
 }
 
 export const ReportModal: React.FC<ReportModalProps> = ({
@@ -134,7 +134,11 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         is_demo: false
       });
 
-      onReportCreated?.();
+      onReportCreated?.({
+        id: client_uuid,
+        depth,
+        landmark: 'Deccan Gymkhana, Pune',
+      });
       onClose();
     } catch (err) {
       console.error('Submission failed:', err);

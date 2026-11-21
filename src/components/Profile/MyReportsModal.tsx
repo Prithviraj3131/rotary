@@ -8,6 +8,8 @@ interface MyReportsModalProps {
   onClose: () => void;
   reports: ReportRow[];
   onOpenReportModal: () => void;
+  onOpenHelpSupport?: () => void;
+  onOpenOnboarding?: () => void;
 }
 
 export const MyReportsModal: React.FC<MyReportsModalProps> = ({
@@ -15,6 +17,8 @@ export const MyReportsModal: React.FC<MyReportsModalProps> = ({
   onClose,
   reports,
   onOpenReportModal,
+  onOpenHelpSupport,
+  onOpenOnboarding,
 }) => {
   const [activeTab, setActiveTab] = useState<'reports' | 'wearable' | 'explainability'>('reports');
   const [smartwatchPaired, setSmartwatchPaired] = useState(false);
@@ -263,6 +267,37 @@ export const MyReportsModal: React.FC<MyReportsModalProps> = ({
             </pre>
           </div>
         )}
+
+        {/* Footer Quick Links */}
+        <div className="p-3 bg-surface-container-low border-t border-surface-container flex items-center justify-between text-xs">
+          {onOpenOnboarding && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenOnboarding();
+              }}
+              className="text-on-surface-variant hover:text-primary font-semibold flex items-center gap-1 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[16px]">explore</span>
+              <span>Replay App Tour</span>
+            </button>
+          )}
+
+          {onOpenHelpSupport && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenHelpSupport();
+              }}
+              className="text-error font-semibold flex items-center gap-1 hover:underline transition-colors ml-auto"
+            >
+              <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                emergency
+              </span>
+              <span>Helplines & Safety</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
