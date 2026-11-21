@@ -1,0 +1,61 @@
+{
+  "susceptibility": {
+    "w_hand": 0.40,
+    "w_acc": 0.25,
+    "w_slope": 0.20,
+    "w_underpass": 0.15,
+    "w_hotspot": 0.15
+  },
+  "rain": {
+    "intensity_weight": 0.60,
+    "accum_weight": 0.40,
+    "intensity_norm_mm_hr": 50.0,
+    "accum_norm_mm_3h": 100.0,
+    "heavy_rain_threshold_mm_hr": 15.0
+  },
+  "spread": {
+    "decay_distance_m": 300.0,
+    "max_distance_m": 1500.0,
+    "downhill_factor": 1.0,
+    "uphill_factor": 0.3,
+    "severity_weights": {
+      "ankle": 0.4,
+      "knee": 0.7,
+      "waist": 1.0,
+      "vehicle_stalls": 1.0
+    }
+  },
+  "risk_bands": {
+    "possible_min": 0.40,
+    "likely_min": 0.70
+  },
+  "routing": {
+    "lambda": 4.0,
+    "underpass_rain_threshold": 0.5,
+    "hazard_radius_m": {
+      "ankle": 40.0,
+      "knee": 80.0,
+      "waist": 150.0,
+      "vehicle_stalls": 150.0
+    },
+    "buffer_m": 50.0
+  },
+  "trust": {
+    "base_weight": 1.0,
+    "camera_bonus": 0.5,
+    "gps_road_bonus": 0.5,
+    "min_trust": 0.5,
+    "max_trust": 1.5,
+    "vote_distance_m": 300.0,
+    "cluster_radius_m": 100.0,
+    "window_minutes": 30,
+    "expiry_minutes": 90,
+    "thresholds": {
+      "unverified_max": 2.0,
+      "confirmed_min": 2.0,
+      "severe_min": 4.0,
+      "severe_vehicle_stalls_min": 2.5,
+      "clears_needed": 2
+    }
+  }
+}
