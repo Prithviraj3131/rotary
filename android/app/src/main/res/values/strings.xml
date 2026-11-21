@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FloodGuard AI</string>
+    <string name="title_activity_main">FloodGuard AI</string>
+    <string name="package_name">com.rotary.floodguard</string>
+    <string name="custom_url_scheme">com.rotary.floodguard</string>
+</resources>
