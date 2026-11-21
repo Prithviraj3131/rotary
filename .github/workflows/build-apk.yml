@@ -34,10 +34,13 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
-      - name: Copy Assets to Android
-        run: npx cap copy android
+      - name: Copy Built Web Assets to Android
+        run: |
+          mkdir -p android/app/src/main/assets/public
+          cp -r dist/* android/app/src/main/assets/public/
+          cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
 
-      - name: Configure Android SDK & Gradle
+      - name: Configure Android SDK & Permissions
         run: |
           chmod +x android/gradlew
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
