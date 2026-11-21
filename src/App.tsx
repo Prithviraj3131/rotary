@@ -6,6 +6,8 @@ import { FloodMap } from './components/Map/FloodMap';
 import { ReportModal } from './components/Report/ReportModal';
 import { UrgentAlertModal } from './components/Alerts/UrgentAlertModal';
 import { DeliveryTrackerModal } from './components/Alerts/DeliveryTrackerModal';
+import { AlertsCentreModal } from './components/Alerts/AlertsCentreModal';
+import { MyReportsModal } from './components/Profile/MyReportsModal';
 import { HeavyRainSimulator } from './components/Demo/HeavyRainSimulator';
 import { HotspotAnalyticsModal } from './components/Analytics/HotspotAnalyticsModal';
 import { SavedRoutesModal } from './components/Routing/SavedRoutesModal';
@@ -29,6 +31,8 @@ export const App: React.FC = () => {
   const [topMode, setTopMode] = useState<TopMode>('consumer');
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [showAlertsModal, setShowAlertsModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [showSavedRoutesModal, setShowSavedRoutesModal] = useState(false);
   const [reports, setReports] = useState<ReportRow[]>([]);
@@ -79,23 +83,42 @@ export const App: React.FC = () => {
 
   // Subscribe to real-time sync (Supabase + cross-tab BroadcastChannel)
   useEffect(() => {
+    setReports(localReportsStore.getAll());
+
     const unsubscribe = initRealtimeSubscriptions((updatedReports) => {
       setReports(updatedReports);
     });
-    return unsubscribe;
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
-  // Subscribe to Alert Delivery State Machine
+  // Listen to Alert Delivery State Machine
   useEffect(() => {
     const unsub = deliveryStateMachine.subscribe((state) => {
       setActiveDelivery(state);
-      if (state.status === 'push_sent') {
+      if (state.status === 'push_sent' || state.status === 'sms_fallback_sent') {
         setShowUrgentModal(true);
-        setShowTrackerModal(true);
+      } else {
+        setShowUrgentModal(false);
       }
     });
-    return unsub;
+
+    return () => {
+      unsub();
+    };
   }, []);
+
+  // Compute hydrological grid predictions based on live weather rainFactor
+  const predictedCells = calculatePuneCellRisks(
+    weather?.rainFactor ?? 0.4,
+    weather?.currentRainMmHr ?? 18,
+    reports
+  );
+
+  // Forecast hotspot check (e.g., Sinhagad / Katraj basin > 15 mm/hr)
+  const forecastAlert = weather ? checkForecastHotspotAlert(weather.forecastPeakMmHr) : null;
 
   const handleAcknowledgeAlert = () => {
     if (activeDelivery) {
@@ -158,48 +181,46 @@ export const App: React.FC = () => {
       ...report,
       clears: evaluation.clearsCount,
       status: evaluation.newStatus,
+      last_verified_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
     };
 
     await broadcastReportUpsert(updated);
   };
 
-  const forecastAlert = weather ? checkForecastHotspotAlert(weather.forecastPeakMmHr) : null;
-
-  // Compute dynamic prediction grid using Highlight 1 model
-  const predictedCells = calculatePuneCellRisks(
-    weather?.rainFactor || 0.42,
-    weather?.currentRainMmHr || 18,
-    reports
-  );
+  const criticalAlertsCount = reports.filter(
+    (r) => r.status === 'severe' || r.depth === 'waist'
+  ).length;
 
   return (
-    <div className="min-h-screen bg-surface text-on-surface flex flex-col relative select-none">
-      {/* Top Header with Console Switcher */}
+    <div className="flex flex-col min-h-screen bg-surface text-on-surface font-sans selection:bg-secondary/20">
+      {/* Top Header with Console Switcher, Alert Bell & Profile */}
       <Header
         topMode={topMode}
         setTopMode={setTopMode}
         locality="Pune Operations"
+        onOpenAlerts={() => setShowAlertsModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
+        activeAlertCount={criticalAlertsCount}
       />
 
-      {/* Main Viewport */}
-      <div className="flex-1 flex flex-col pt-16">
-        {/* Proactive Forecast Heads-Up Banner */}
+      <div className="flex-1 flex flex-col pt-16 pb-20 relative">
+        {/* Proactive Forecast Alert Banner (Shows when rainfall > 15 mm/hr) */}
         {forecastAlert && showForecastBanner && (
           <ForecastBanner
             placeName={forecastAlert.placeName}
             forecastMmHr={forecastAlert.forecastMmHr}
-            rainFactor={weather?.rainFactor || 0.65}
-            isDemo={weather?.isDemo}
+            rainFactor={weather?.rainFactor ?? 0.5}
             onDismiss={() => setShowForecastBanner(false)}
           />
         )}
 
-        {/* Demo Controls Strip */}
+        {/* Floating Quick Action Utility Toolbar */}
         {topMode === 'consumer' && (
-          <div className="w-full max-w-md md:max-w-xl mx-auto px-4 pt-2 flex items-center justify-between text-xs gap-2">
+          <div className="max-w-md md:max-w-xl mx-auto w-full px-4 pt-2.5 flex items-center justify-between gap-2 overflow-x-auto">
             <button
               onClick={() => setShowSavedRoutesModal(true)}
-              className="px-2.5 py-1 rounded-lg bg-surface-container text-on-surface font-semibold text-[11px] border border-surface-container-high hover:bg-surface-container-high transition-colors flex items-center gap-1"
+              className="px-2.5 py-1 rounded-lg bg-surface-container text-on-surface font-semibold text-[11px] border border-surface-container-high hover:bg-surface-container-high transition-colors flex items-center gap-1 shrink-0"
             >
               <span className="material-symbols-outlined text-[14px] text-secondary">bookmark</span>
               <span>Saved Corridors (200m Monitor)</span>
@@ -207,10 +228,18 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setShowAnalyticsModal(true)}
-              className="px-2.5 py-1 rounded-lg bg-surface-container text-on-surface font-semibold text-[11px] border border-surface-container-high hover:bg-surface-container-high transition-colors flex items-center gap-1"
+              className="px-2.5 py-1 rounded-lg bg-surface-container text-on-surface font-semibold text-[11px] border border-surface-container-high hover:bg-surface-container-high transition-colors flex items-center gap-1 shrink-0"
             >
               <span className="material-symbols-outlined text-[14px] text-primary">bar_chart</span>
               <span>Pune Hotspots</span>
+            </button>
+
+            <button
+              onClick={() => setShowAlertsModal(true)}
+              className="px-2.5 py-1 rounded-lg bg-surface-container text-on-surface font-semibold text-[11px] border border-surface-container-high hover:bg-surface-container-high transition-colors flex items-center gap-1 shrink-0"
+            >
+              <span className="material-symbols-outlined text-[14px] text-error">campaign</span>
+              <span>Alert Centre</span>
             </button>
           </div>
         )}
@@ -238,6 +267,7 @@ export const App: React.FC = () => {
                 reports={reports}
                 setActiveTab={setActiveTab}
                 onOpenReport={() => setIsReportModalOpen(true)}
+                onOpenAlerts={() => setShowAlertsModal(true)}
               />
             )}
 
@@ -284,6 +314,29 @@ export const App: React.FC = () => {
       <ReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
+      />
+
+      {/* Pune Alerts Centre Modal */}
+      <AlertsCentreModal
+        isOpen={showAlertsModal}
+        onClose={() => setShowAlertsModal(false)}
+        reports={reports}
+        onViewOnMap={(_report) => {
+          setShowAlertsModal(false);
+          setActiveTab('map');
+        }}
+        onFindReroute={(_report) => {
+          setShowAlertsModal(false);
+          setActiveTab('reroute');
+        }}
+      />
+
+      {/* Citizen Profile & My Reports Modal */}
+      <MyReportsModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        reports={reports}
+        onOpenReportModal={() => setIsReportModalOpen(true)}
       />
 
       {/* Urgent Alert Modal (Siren & Vibration) */}

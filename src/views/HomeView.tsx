@@ -9,6 +9,7 @@ interface HomeViewProps {
   reports: ReportRow[];
   setActiveTab: (tab: NavTab) => void;
   onOpenReport: () => void;
+  onOpenAlerts?: () => void;
 }
 
 const LOCALITIES = ['Deccan Gymkhana, Pune', 'Sinhagad Road, Pune', 'Baner, Pune', 'Kothrud, Pune'];
@@ -18,6 +19,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   reports,
   setActiveTab,
   onOpenReport,
+  onOpenAlerts,
 }) => {
   const [localityIndex, setLocalityIndex] = useState(0);
   const currentLocality = LOCALITIES[localityIndex];
@@ -175,10 +177,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* 4. Active Ground Flood Hazards Preview */}
       <div className="w-full rounded-2xl bg-surface-container-lowest border border-surface-container-high p-4 flex flex-col gap-2.5 shadow-sm">
         <div className="flex items-center justify-between">
-          <span className="font-bold text-sm text-on-surface">Reported Waterlogged Roads</span>
-          <span className="text-xs text-secondary font-semibold cursor-pointer" onClick={() => setActiveTab('map')}>
-            View on Map
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-sm text-on-surface">Reported Waterlogged Roads</span>
+            {activeConfirmedReports.length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {onOpenAlerts && (
+              <span
+                className="text-xs text-primary font-bold cursor-pointer hover:underline"
+                onClick={onOpenAlerts}
+              >
+                Alerts Feed
+              </span>
+            )}
+            <span
+              className="text-xs text-secondary font-semibold cursor-pointer hover:underline"
+              onClick={() => setActiveTab('map')}
+            >
+              View on Map
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">
