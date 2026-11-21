@@ -217,7 +217,16 @@ export const App: React.FC = () => {
   ).length;
 
   return (
-    <div className="flex flex-col min-h-screen bg-surface text-on-surface font-sans selection:bg-secondary/20">
+    <div className="flex flex-col min-h-screen bg-surface text-on-surface font-sans selection:bg-secondary/20 relative">
+      {/* Light Atmospheric Backdrop from UI/UX template */}
+      <div
+        className="fixed inset-0 -z-10 bg-cover bg-center pointer-events-none opacity-40"
+        style={{
+          backgroundImage:
+            "url('https://lh3.googleusercontent.com/aida-public/AB6AXuDEOhQOX9OhPBhd7wtGA5KS1PBJEntk9oX3WHQi2VAwmetm3Fkj6NEbJBI7_2DKiLT-rl2ptPaThepI9RuYXcLIYISrAx6wzYQI-AUB1OlOhEp-AFE03iRz3FjQx-SKQj-bDtceGk-B-ilX5p9qiAffYpYByrAgoE1wEr0Ao4aI1PHpD94_4Raep4zjHGnPf8AulL33YAtQ4Eq4CW5Ap7g8Ope6w3DP4lghX2GpRGT4')",
+        }}
+      />
+
       {/* Top Header with Console Switcher, Alert Bell, Help & Profile */}
       <Header
         topMode={topMode}

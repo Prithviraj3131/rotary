@@ -131,7 +131,7 @@ export const OfflineCommView: React.FC = () => {
 
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="p-3 bg-slate-900 text-slate-100 rounded-xl text-xs font-semibold shadow-lg border border-slate-700 flex items-center gap-2 animate-bounce-short">
+        <div className="p-3 bg-surface-container-lowest text-on-surface rounded-xl text-xs font-semibold shadow-md border border-secondary/30 flex items-center gap-2 animate-bounce-short">
           <span className="material-symbols-outlined text-[18px] text-secondary">bluetooth_audio</span>
           <span>{toastMessage}</span>
         </div>
