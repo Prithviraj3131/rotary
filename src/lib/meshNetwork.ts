@@ -22,8 +22,15 @@ export function getDeviceId(): string {
 }
 
 export function getDeviceName(): string {
-  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  return isMobile ? 'Android Mobile Peer' : 'Citizen Web Terminal';
+  if (typeof window === 'undefined') return 'Citizen Web Terminal';
+  let name = localStorage.getItem('floodguard_device_name');
+  if (!name || name === 'Android Mobile Peer' || name === 'Citizen Web Terminal') {
+    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const suffix = Math.floor(1000 + Math.random() * 9000).toString();
+    name = isMobile ? `Phone-${suffix}` : `Web-${suffix}`;
+    localStorage.setItem('floodguard_device_name', name);
+  }
+  return name;
 }
 
 // Resolves local LAN Relay Hub URL

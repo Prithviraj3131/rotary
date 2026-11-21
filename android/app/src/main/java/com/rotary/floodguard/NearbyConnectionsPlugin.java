@@ -80,7 +80,8 @@ public class NearbyConnectionsPlugin extends Plugin {
         connectionsClient = Nearby.getConnectionsClient(getContext());
         // Guaranteed unique node name across duplicate phone models
         String cleanModel = Build.MODEL != null ? Build.MODEL.replaceAll("[^a-zA-Z0-9]", "") : "Phone";
-        localEndpointName = "Node-" + cleanModel + "-" + ((int)(Math.random() * 9000) + 1000);
+        if (cleanModel.length() > 8) cleanModel = cleanModel.substring(0, 8);
+        localEndpointName = "Phone-" + cleanModel + "-" + ((int)(Math.random() * 9000) + 1000);
     }
 
     @PluginMethod
@@ -131,8 +132,14 @@ public class NearbyConnectionsPlugin extends Plugin {
     @PluginMethod
     public void startMesh(PluginCall call) {
         String name = call.getString("endpointName");
-        if (name != null && !name.trim().isEmpty()) {
+        if (name != null && !name.trim().isEmpty()
+                && !name.equals("Android Mobile Peer")
+                && !name.equals("Citizen Web Terminal")) {
             localEndpointName = name.trim();
+        }
+        // Ensure localEndpointName is never a generic name that could cause tie-break deadlock
+        if (localEndpointName == null || localEndpointName.equals("Android Mobile Peer") || localEndpointName.equals("Citizen Web Terminal")) {
+            localEndpointName = "Phone-" + ((int)(Math.random() * 9000) + 1000);
         }
 
         // Check if permissions need requesting
@@ -299,14 +306,27 @@ public class NearbyConnectionsPlugin extends Plugin {
             data.put("name", info.getEndpointName());
             notifyListeners("onEndpointFound", data);
 
-            // Tie-breaking check: Only the node with higher name initiates requestConnection
-            // This prevents mutual simultaneous collision that drops connections on Android
-            if (localEndpointName.compareTo(info.getEndpointName()) > 0) {
-                notifyStatusChange("initiating_connection_to: " + info.getEndpointName());
-                connectionsClient.requestConnection(localEndpointName, endpointId, connectionLifecycleCallback)
+            final String remoteEndpointId = endpointId;
+            final String remoteName = info.getEndpointName();
+
+            // Tie-breaking check:
+            // 1. If localEndpointName is lexicographically greater than remote, initiate connection immediately.
+            // 2. If equal or smaller, wait for connection from remote. If no connection arrives within 2000ms,
+            //    initiate connection as fallback to eliminate any deadlock.
+            int cmp = localEndpointName.compareTo(remoteName);
+            if (cmp > 0) {
+                notifyStatusChange("initiating_connection_to: " + remoteName);
+                connectionsClient.requestConnection(localEndpointName, remoteEndpointId, connectionLifecycleCallback)
                     .addOnFailureListener(e -> notifyStatusChange("connect_request_failed: " + e.getMessage()));
             } else {
-                notifyStatusChange("awaiting_connection_from: " + info.getEndpointName());
+                notifyStatusChange("awaiting_connection_from: " + remoteName);
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    if (!connectedEndpoints.containsKey(remoteEndpointId) && discoveredEndpoints.containsKey(remoteEndpointId)) {
+                        notifyStatusChange("fallback_initiating_to: " + remoteName);
+                        connectionsClient.requestConnection(localEndpointName, remoteEndpointId, connectionLifecycleCallback)
+                            .addOnFailureListener(e -> notifyStatusChange("fallback_request_note: " + e.getMessage()));
+                    }
+                }, 2000);
             }
         }
 
@@ -328,7 +348,8 @@ public class NearbyConnectionsPlugin extends Plugin {
             discoveredEndpoints.put(endpointId, info.getEndpointName());
 
             // Auto-accept connection for zero-click disaster mesh relay
-            connectionsClient.acceptConnection(endpointId, payloadCallback);
+            connectionsClient.acceptConnection(endpointId, payloadCallback)
+                .addOnFailureListener(e -> notifyStatusChange("accept_connection_failed: " + e.getMessage()));
 
             JSObject data = new JSObject();
             data.put("endpointId", endpointId);
@@ -340,19 +361,21 @@ public class NearbyConnectionsPlugin extends Plugin {
 
         @Override
         public void onConnectionResult(@NonNull String endpointId, @NonNull ConnectionResolution resolution) {
-            boolean success = resolution.getStatus().getStatusCode() == ConnectionsStatusCodes.STATUS_OK;
+            int statusCode = resolution.getStatus().getStatusCode();
+            boolean success = (statusCode == ConnectionsStatusCodes.STATUS_OK ||
+                               statusCode == ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT);
             if (success) {
                 String name = discoveredEndpoints.getOrDefault(endpointId, "Nearby Peer");
                 connectedEndpoints.put(endpointId, name);
                 notifyStatusChange("peer_connected_success: " + name);
             } else {
-                notifyStatusChange("connection_rejected_or_failed_code: " + resolution.getStatus().getStatusCode());
+                notifyStatusChange("connection_rejected_or_failed_code: " + statusCode);
             }
 
             JSObject data = new JSObject();
             data.put("endpointId", endpointId);
             data.put("status", success ? "CONNECTED" : "FAILED");
-            data.put("statusCode", resolution.getStatus().getStatusCode());
+            data.put("statusCode", statusCode);
             notifyListeners("onConnectionResult", data);
         }
 

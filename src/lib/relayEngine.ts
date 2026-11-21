@@ -109,6 +109,14 @@ export function verifyAndProcessPacket(packet: AlertPacket): {
   return { accepted: true, reason: 'Accepted locally (Terminal hop 0, not forwarded)' };
 }
 
+type MessageBroadcaster = (msg: OfflineQueuedMessage) => void;
+const messageBroadcasters = new Set<MessageBroadcaster>();
+
+export function registerOfflineMessageBroadcaster(broadcaster: MessageBroadcaster): () => void {
+  messageBroadcasters.add(broadcaster);
+  return () => messageBroadcasters.delete(broadcaster);
+}
+
 /**
  * Adds an offline message composed by the user to the local IndexedDB device queue
  */
@@ -145,6 +153,11 @@ export async function queueOfflineMessage(
 
   // Broadcast to all nearby nodes via LAN Relay & Cross-tab
   broadcastMeshMessage(msg).catch(() => {});
+
+  // Broadcast via registered live P2P mesh radios (e.g. Google Nearby Connections)
+  messageBroadcasters.forEach((fn) => {
+    try { fn(msg); } catch {}
+  });
 
   return msg;
 }

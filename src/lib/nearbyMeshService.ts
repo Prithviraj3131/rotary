@@ -1,7 +1,7 @@
 import { registerPlugin } from '@capacitor/core';
 import { getDeviceId, getDeviceName, broadcastMeshMessage } from './meshNetwork';
 import { OfflineQueuedMessage } from '../types/relay';
-import { handleIncomingMeshMessage } from './relayEngine';
+import { handleIncomingMeshMessage, registerOfflineMessageBroadcaster } from './relayEngine';
 import { emergencyAudio } from './audioAlert';
 
 export interface DiscoveredPeer {
@@ -84,8 +84,16 @@ class NearbyMeshService {
     logs: [`[${new Date().toLocaleTimeString()}] Nearby Mesh Subsystem initialized`],
   };
 
+  private syncTimer: any = null;
+
   constructor() {
     this.checkSupport();
+    registerOfflineMessageBroadcaster(async (msg) => {
+      // Whenever an offline message is queued in the app, broadcast it via active Nearby P2P mesh
+      if (this.state.isMeshActive && this.state.connectedPeers.length > 0) {
+        await this.broadcastPacket(msg.text, msg.tag, msg.priority);
+      }
+    });
   }
 
   public getState(): MeshSystemState {
@@ -187,7 +195,10 @@ class NearbyMeshService {
         if (data.status === 'CONNECTED') {
           this.addLog(`✓ Established P2P mesh link with node ${data.endpointId}`);
           const peer = this.state.discoveredPeers.find((p) => p.endpointId === data.endpointId);
-          const name = peer?.name || 'Nearby Android Phone';
+          if (peer) {
+            peer.connected = true;
+          }
+          const name = peer?.name || `Node-${data.endpointId}`;
           if (!this.state.connectedPeers.some((p) => p.endpointId === data.endpointId)) {
             this.state.connectedPeers.push({
               endpointId: data.endpointId,
@@ -197,7 +208,7 @@ class NearbyMeshService {
             });
           }
         } else {
-          this.addLog(`Pairing failed with node ${data.endpointId} (${data.status})`);
+          this.addLog(`Pairing status with node ${data.endpointId}: ${data.status}`);
         }
         this.notify();
       });
@@ -205,6 +216,10 @@ class NearbyMeshService {
       NativeNearby.addListener('onDisconnected', (data) => {
         this.addLog(`Disconnected from node ${data.endpointId}`);
         this.state.connectedPeers = this.state.connectedPeers.filter((p) => p.endpointId !== data.endpointId);
+        const peer = this.state.discoveredPeers.find((p) => p.endpointId === data.endpointId);
+        if (peer) {
+          peer.connected = false;
+        }
         this.notify();
       });
 
@@ -244,6 +259,7 @@ class NearbyMeshService {
           this.state.nodeName = res.endpointName;
         }
         this.addLog(`Active Radio: BLE advertising & Wi-Fi Direct discovery active (${this.state.nodeName})`);
+        this.startPeriodicSync();
       } catch (err: any) {
         this.addLog(`Native radio init note: ${err?.message || err}. Bridging via LAN Relay.`);
       }
@@ -258,7 +274,57 @@ class NearbyMeshService {
     this.notify();
   }
 
+  private startPeriodicSync() {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = setInterval(async () => {
+      if (!this.state.isMeshActive || !this.state.isNativeSupported) {
+        clearInterval(this.syncTimer);
+        this.syncTimer = null;
+        return;
+      }
+      try {
+        const data = await NativeNearby.getConnectedPeers();
+        if (data) {
+          let updated = false;
+          if (data.connectedPeers && Array.isArray(data.connectedPeers)) {
+            const mapped = data.connectedPeers.map((p) => ({
+              endpointId: p.endpointId,
+              name: p.name,
+              connected: true,
+              lastSeen: Date.now(),
+            }));
+            if (JSON.stringify(mapped) !== JSON.stringify(this.state.connectedPeers)) {
+              this.state.connectedPeers = mapped;
+              updated = true;
+            }
+          }
+          if (data.discoveredPeers && Array.isArray(data.discoveredPeers)) {
+            const mappedDisc = data.discoveredPeers.map((p) => ({
+              endpointId: p.endpointId,
+              name: p.name,
+              connected: p.connected,
+              lastSeen: Date.now(),
+            }));
+            if (JSON.stringify(mappedDisc) !== JSON.stringify(this.state.discoveredPeers)) {
+              this.state.discoveredPeers = mappedDisc;
+              updated = true;
+            }
+          }
+          if ((data as any).endpointName && this.state.nodeName !== (data as any).endpointName) {
+            this.state.nodeName = (data as any).endpointName;
+            updated = true;
+          }
+          if (updated) this.notify();
+        }
+      } catch {}
+    }, 2500);
+  }
+
   public async stopLiveMesh(): Promise<void> {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
     this.state.isMeshActive = false;
     this.state.isAdvertising = false;
     this.state.isDiscovering = false;
