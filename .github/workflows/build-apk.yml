@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build FloodGuard AI Debug APK
@@ -50,18 +53,35 @@ jobs:
       - name: Build Debug APK with Gradle
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../gradle_output.txt
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload Build Log if Failed
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: gradle_output.txt
+      - name: Stage APK for Release and Upload
+        run: |
+          echo "Listing all generated APK files:"
+          find android/app/build/outputs -type f -name "*.apk"
+          APK_PATH=$(find android/app/build/outputs -type f -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ]; then
+            cp "$APK_PATH" ./FloodGuard-AI.apk
+            echo "Successfully staged $APK_PATH to ./FloodGuard-AI.apk"
+          else
+            echo "Error: No APK file was found in android/app/build/outputs"
+            exit 1
+          fi
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FloodGuard-AI-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: FloodGuard-AI-APK
+          path: ./FloodGuard-AI.apk
           if-no-files-found: error
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: v1.0.0
+          name: "FloodGuard AI v1.0.0 (Android APK)"
+          body: "Direct download link for FloodGuard AI Android APK."
+          files: ./FloodGuard-AI.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
